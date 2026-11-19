@@ -1,4 +1,4 @@
-"""Strict blueprint schema and safety validation (schema v1).
+"""Strict blueprint schema and safety validation (schema v2).
 
 Kept free of execution code so it can be used by CI, editors, or other tools:
 
@@ -13,7 +13,9 @@ from __future__ import annotations
 import re
 import shlex
 from datetime import date
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Iterator, Optional
+
+import yaml
 
 SCHEMA_VERSION = 2
 STALE_AFTER_DAYS = 180
@@ -35,6 +37,25 @@ FORBIDDEN_BINARIES = {"sudo", "su", "doas", "rm", "dd", "mkfs", "shutdown", "reb
                       "eval", "exec", "sh", "bash", "zsh", "fish", "pwsh", "powershell", "cmd"}
 DESTRUCTIVE_TOKENS = {"delete", "remove-iam-policy-binding", "delete-deployment", "delete-script",
                       "undeploy", "destroy", "purge"}
+# Allow-list of executables a blueprint may run. Anything else (env, python, node, xargs,
+# find -exec, ...) could smuggle in a shell, so it is rejected. Adding a tool is an engine
+# change reviewed by maintainers, not a blueprint change.
+ALLOWED_BINARIES = {"gcloud", "gsutil", "bq", "firebase", "clasp", "curl", "test"}
+# Sub-command words that change state. Read-only checks (verify_command, skip_if) must not use them.
+MUTATING_WORDS = {"create", "deploy", "enable", "disable", "add-iam-policy-binding", "set-iam-policy",
+                  "update", "set", "push", "apply", "import", "upload", "cp", "mv", "rm", "init",
+                  "login", "logout", "revoke", "grant", "submit", "patch", "replace", "write",
+                  "addfirebase", "clone", "pull", "rollback", "release", "undelete", "activate",
+                  "create-script", "create-deployment", "update-deployment", "redeploy"} | {
+                      "delete", "remove-iam-policy-binding", "delete-deployment", "delete-script",
+                      "undeploy", "destroy", "purge"}
+# curl flags that write files, upload data or change the HTTP method.
+CURL_FORBIDDEN_FLAGS = {"-o", "--output", "-O", "--remote-name", "--remote-name-all", "-T", "--upload-file",
+                        "-K", "--config", "-d", "--data", "--data-binary", "--data-raw", "--data-urlencode",
+                        "--json", "-F", "--form", "-X", "--request", "-c", "--cookie-jar", "-D",
+                        "--dump-header", "--output-dir", "--create-dirs", "--trace", "--trace-ascii",
+                        "--libcurl", "--stderr", "-u", "--user", "-E", "--cert", "--key"}
+MAX_BLUEPRINT_BYTES = 256 * 1024
 NEVER_AUTOMATE = [("gcloud", "projects", "delete"), ("gcloud", "organizations"),
                   ("gcloud", "billing", "accounts")]
 
@@ -45,7 +66,7 @@ TOP_LEVEL_REQUIRED = ("schema_version", "id", "name", "category", "tagline", "ma
 TOP_LEVEL_OPTIONAL = ("keywords", "requires_tools", "docs", "prerequisites", "verification_notes")
 STEP_FIELDS = {"id", "description", "command", "risk", "public_exposure", "verify_command",
                "verify_expect", "manual", "timeout_seconds", "skip_if", "skip_if_expect"}
-TEARDOWN_FIELDS = {"id", "description", "command", "risk", "manual"}
+TEARDOWN_FIELDS = {"id", "description", "command", "risk", "manual", "undoes"}
 VARIABLE_FIELDS = {"key", "prompt", "default", "pattern", "example"}
 
 
@@ -90,6 +111,9 @@ def _validate_command(where: str, command: Any, declared: set[str], errors: list
         errors.append(f"{where}: first token must be a bare tool name, not a path ('{binary}')")
     if binary in FORBIDDEN_BINARIES:
         errors.append(f"{where}: '{binary}' is not an allowed tool in blueprints")
+    elif binary not in ALLOWED_BINARIES and not PLACEHOLDER_RE.search(binary):
+        errors.append(f"{where}: '{binary}' is not on the tool allow-list {sorted(ALLOWED_BINARIES)} "
+                      "(adding a tool is an engine change; see CONTRIBUTING.md)")
     if PLACEHOLDER_RE.search(binary):
         errors.append(f"{where}: the tool name cannot be a variable")
     for match in PLACEHOLDER_RE.finditer(command):
@@ -109,8 +133,41 @@ def _validate_command(where: str, command: Any, declared: set[str], errors: list
     return toks
 
 
+def _words(tokens: Iterable[str]) -> list[str]:
+    """Sub-command words, including the parts of firebase-style ``a:b:c`` commands."""
+    words: list[str] = []
+    for t in tokens:
+        if t.startswith("-") or PLACEHOLDER_RE.search(t):
+            continue
+        low = t.lower()
+        words.append(low)
+        if ":" in low and "/" not in low:
+            words.extend(p for p in low.split(":") if p)
+    return words
+
+
 def _is_destructive(tokens: Iterable[str]) -> bool:
-    return any(t.lower() in DESTRUCTIVE_TOKENS for t in tokens)
+    return any(w in DESTRUCTIVE_TOKENS or w == "disable" for w in _words(tokens))
+
+
+def _readonly_problems(tokens: list[str]) -> list[str]:
+    """Why a verify_command / skip_if is not read-only (empty list means it is)."""
+    problems = []
+    binary = tokens[0] if tokens else ""
+    if binary == "curl":
+        bad = sorted({t.split("=", 1)[0] for t in tokens[1:]
+                      if t.split("=", 1)[0] in CURL_FORBIDDEN_FLAGS
+                      or (t.startswith("-") and not t.startswith("--") and len(t) > 2
+                          and any(f"-{c}" in CURL_FORBIDDEN_FLAGS for c in t[1:]))})
+        if bad:
+            problems.append(f"curl flags {bad} can write files, upload data or change the method")
+        return problems
+    if binary == "test":
+        return problems
+    mutating = sorted({w for w in _words(tokens[1:]) if w in MUTATING_WORDS})
+    if mutating:
+        problems.append(f"uses state-changing word(s) {mutating}")
+    return problems
 
 
 def parse_date(value: Any) -> Optional[date]:
@@ -125,10 +182,14 @@ def parse_date(value: Any) -> Optional[date]:
     return None
 
 
+def _as_list(value: Any) -> list:
+    return value if isinstance(value, list) else []
+
+
 def required_tools_from_data(data: dict) -> set[str]:
-    tools = set(t for t in (data.get("requires_tools") or []) if isinstance(t, str))
+    tools = set(t for t in _as_list(data.get("requires_tools")) if isinstance(t, str))
     for group in ("steps", "teardown"):
-        for item in data.get(group) or []:
+        for item in _as_list(data.get(group)):
             if not isinstance(item, dict):
                 continue
             for key in ("command", "verify_command", "skip_if"):
@@ -179,16 +240,36 @@ def _validate_freshness(data: dict, errors: list[str], today: Optional[date]) ->
                               "in verified_versions")
 
 
-def _find_todo(value: Any, path: str = ""):
+MAX_DEPTH = 32
+
+
+def _find_todo(value: Any, path: str = "", depth: int = 0) -> Iterator[str]:
+    if depth > MAX_DEPTH:
+        return
     if isinstance(value, str):
         if re.search(r"\bTODO\b", value):
             yield path or "(root)"
     elif isinstance(value, dict):
         for k, v in value.items():
-            yield from _find_todo(v, f"{path}.{k}" if path else str(k))
+            yield from _find_todo(v, f"{path}.{k}" if path else str(k), depth + 1)
     elif isinstance(value, list):
         for i, v in enumerate(value):
-            yield from _find_todo(v, f"{path}[{i}]")
+            yield from _find_todo(v, f"{path}[{i}]", depth + 1)
+
+
+def _depth(value: Any, limit: int = MAX_DEPTH) -> int:
+    """Nesting depth, capped at ``limit + 1`` (iterative, so it cannot overflow the stack)."""
+    deepest, stack = 0, [(value, 0)]
+    while stack:
+        item, d = stack.pop()
+        deepest = max(deepest, d)
+        if deepest > limit:
+            return deepest
+        if isinstance(item, dict):
+            stack.extend((v, d + 1) for v in item.values())
+        elif isinstance(item, list):
+            stack.extend((v, d + 1) for v in item)
+    return deepest
 
 
 def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
@@ -197,6 +278,10 @@ def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
     errors: list[str] = []
     if not isinstance(data, dict):
         return ["blueprint.yaml must contain a mapping at the top level"]
+    if _depth(data) > MAX_DEPTH:
+        return [f"blueprint.yaml is nested more than {MAX_DEPTH} levels deep"]
+    if not all(isinstance(k, str) for k in data):
+        return ["top-level keys must be strings"]
 
     for key in TOP_LEVEL_REQUIRED:
         if key not in data:
@@ -237,8 +322,8 @@ def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
     for key in ("keywords", "requires_tools", "prerequisites", "docs"):
         if key in data and not (isinstance(data[key], list) and all(_nonempty_str(v) for v in data[key])):
             errors.append(f"'{key}' must be a list of non-empty strings")
-    for tool in data.get("requires_tools") or []:
-        if isinstance(tool, str) and tool in FORBIDDEN_BINARIES:
+    for tool in _as_list(data.get("requires_tools")):
+        if isinstance(tool, str) and (tool in FORBIDDEN_BINARIES or tool not in ALLOWED_BINARIES):
             errors.append(f"requires_tools: '{tool}' is not an allowed tool")
 
     services = data.get("services")
@@ -336,10 +421,14 @@ def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
             toks = _validate_command(where, step.get("command"), declared, errors)
             if toks and _is_destructive(toks) and risk != "high":
                 errors.append(f"{where}: destructive command must be marked risk: high")
+            if toks and toks[0] == "curl":
+                for problem in _readonly_problems(toks):
+                    errors.append(f"{where}: curl may only be used read-only ({problem})")
             if "verify_command" in step:
                 vtoks = _validate_command(f"{where} verify_command", step["verify_command"], declared, errors)
-                if vtoks and _is_destructive(vtoks):
-                    errors.append(f"{where}: verify_command must be read-only")
+                if vtoks:
+                    for problem in _readonly_problems(vtoks):
+                        errors.append(f"{where}: verify_command must be read-only ({problem})")
             if "verify_expect" in step:
                 if not _nonempty_str(step["verify_expect"]):
                     errors.append(f"{where}: verify_expect must be a non-empty string")
@@ -351,8 +440,9 @@ def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
                             errors.append(f"{where}: verify_expect placeholder '{m.group(1)}' is not declared")
             if "skip_if" in step:
                 stoks = _validate_command(f"{where} skip_if", step["skip_if"], declared, errors)
-                if stoks and _is_destructive(stoks):
-                    errors.append(f"{where}: skip_if must be read-only")
+                if stoks:
+                    for problem in _readonly_problems(stoks):
+                        errors.append(f"{where}: skip_if must be read-only ({problem})")
             if "skip_if_expect" in step:
                 if not _nonempty_str(step["skip_if_expect"]):
                     errors.append(f"{where}: skip_if_expect must be a non-empty string")
@@ -392,14 +482,77 @@ def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
             risk = td.get("risk", "high")
             if risk not in RISK_LEVELS:
                 errors.append(f"{where}: risk must be one of {list(RISK_LEVELS)}")
+            if "manual" in td and not isinstance(td["manual"], bool):
+                errors.append(f"{where}: manual must be true/false")
             if td.get("manual"):
-                if "command" in td:
-                    errors.append(f"{where}: manual teardown entries must not define 'command'")
+                for f_ in ("command", "undoes"):
+                    if f_ in td:
+                        errors.append(f"{where}: manual teardown entries must not define '{f_}'")
                 continue
             has_command = True
+            undoes = td.get("undoes")
+            if undoes is None:
+                errors.append(f"{where}: automated teardown entries must declare 'undoes: [step-id, ...]' "
+                              "(the steps whose resources it removes) so teardown never deletes "
+                              "something the run did not create")
+            else:
+                if not (isinstance(undoes, list) and undoes and all(isinstance(u, str) for u in undoes)):
+                    errors.append(f"{where}: undoes must be a non-empty list of step ids")
+                else:
+                    for u in undoes:
+                        if u not in step_ids:
+                            errors.append(f"{where}: undoes references unknown step '{u}'")
             toks = _validate_command(where, td.get("command"), declared, errors)
+            if toks and toks[0] == "curl":
+                errors.append(f"{where}: curl cannot be used in teardown")
             if toks and _is_destructive(toks) and risk != "high":
                 errors.append(f"{where}: destructive command must be marked risk: high")
         if teardown and not has_command:
             errors.append("'teardown' must include at least one command")
     return errors
+
+
+# --------------------------------------------------------------------------- safe loading
+
+
+class _NoAliasSafeLoader(yaml.SafeLoader):
+    """SafeLoader that rejects anchors/aliases (no billion-laughs, no recursive structures)."""
+
+    def compose_node(self, parent, index):  # type: ignore[no-untyped-def]
+        if self.check_event(yaml.AliasEvent):
+            event = self.peek_event()
+            raise yaml.composer.ComposerError(
+                None, None, "YAML aliases (*name) are not allowed in blueprints", event.start_mark)
+        return super().compose_node(parent, index)
+
+
+def safe_load_blueprint_text(text: str) -> Any:
+    """``yaml.safe_load`` without aliases and with a size cap. Raises ``yaml.YAMLError`` or ``ValueError``."""
+    if len(text.encode("utf-8", errors="replace")) > MAX_BLUEPRINT_BYTES:
+        raise ValueError(f"blueprint.yaml is larger than {MAX_BLUEPRINT_BYTES // 1024} KiB")
+    return yaml.load(text, Loader=_NoAliasSafeLoader)  # noqa: S506 - SafeLoader subclass
+
+
+# --------------------------------------------------------------------------- recorded commands
+
+
+def recorded_argv_problems(argv: Any, where: str = "command") -> list[str]:
+    """Re-check an argv read back from ``.doogle/state.json`` before executing it.
+
+    State files live on disk and can be edited, corrupted or copied from someone else, so the
+    executor never trusts them blindly: the same allow-list and never-automate rules apply.
+    """
+    if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
+        return [f"{where}: recorded argv must be a non-empty list of strings"]
+    problems = []
+    binary = argv[0]
+    if binary not in ALLOWED_BINARIES or binary in FORBIDDEN_BINARIES:
+        problems.append(f"{where}: recorded tool '{binary}' is not on the allow-list {sorted(ALLOWED_BINARIES)}")
+    if any(any(ord(c) < 32 or ord(c) == 127 for c in a) for a in argv):
+        problems.append(f"{where}: recorded argv contains control characters")
+    lowered = [a.lower() for a in argv]
+    for pattern in NEVER_AUTOMATE:
+        n = len(pattern)
+        if any(tuple(lowered[i:i + n]) == pattern for i in range(len(lowered) - n + 1)):
+            problems.append(f"{where}: '{' '.join(pattern)}' must never be automated")
+    return problems

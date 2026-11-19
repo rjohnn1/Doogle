@@ -15,6 +15,7 @@ Design rules (see README "Safety rules"):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -24,15 +25,17 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from importlib import resources
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence
 
 import yaml
 
 from .validator import (  # noqa: F401  (re-exported for backwards compatibility)
+    ALLOWED_BINARIES,
     DESTRUCTIVE_TOKENS,
     FORBIDDEN_BINARIES,
     ID_RE,
@@ -54,10 +57,24 @@ from .validator import (  # noqa: F401  (re-exported for backwards compatibility
     VARIABLE_FIELDS,
     _tokens,
     parse_date,
+    recorded_argv_problems,
+    safe_load_blueprint_text,
     validate_blueprint_data,
 )
 
+__all__ = [
+    "ALLOWED_BINARIES", "DESTRUCTIVE_TOKENS", "FORBIDDEN_BINARIES", "ID_RE", "NEVER_AUTOMATE",
+    "PLACEHOLDER_RE", "PRICE_RE", "RISK_LEVELS", "SCHEMA_VERSION", "SECRET_KEY_RE", "SHELL_OPERATORS",
+    "STALE_AFTER_DAYS", "UNVERIFIED", "VERIFICATION_STATUSES", "STEP_FIELDS", "TEARDOWN_FIELDS",
+    "TOP_LEVEL_OPTIONAL", "TOP_LEVEL_REQUIRED", "VAR_KEY_RE", "VARIABLE_FIELDS", "parse_date",
+    "recorded_argv_problems", "safe_load_blueprint_text", "validate_blueprint_data",
+]
+
 STATE_VERSION = 1
+MAX_VALUE_LENGTH = 512
+# Unicode categories never allowed in a variable value: controls, format characters (bidi
+# overrides, zero-width joiners), line/paragraph separators, surrogates, private use, unassigned.
+FORBIDDEN_VALUE_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"}
 BLUEPRINTS_ENV = "DOOGLE_BLUEPRINTS_DIR"
 STATE_DIR_ENV = "DOOGLE_STATE_DIR"
 GEMINI_MODEL_ENV = "DOOGLE_GEMINI_MODEL"
@@ -206,6 +223,7 @@ class TeardownStep:
     command: Optional[str] = None
     risk: str = "high"
     manual: bool = False
+    undoes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -316,7 +334,8 @@ def blueprint_from_data(data: dict, path: Optional[Path] = None) -> Blueprint:
                     skip_if=s.get("skip_if"), skip_if_expect=s.get("skip_if_expect"))
                for s in data["steps"]],
         teardown=[TeardownStep(id=t["id"], description=t["description"].strip(), command=t.get("command"),
-                               risk=t.get("risk", "high"), manual=bool(t.get("manual", False)))
+                               risk=t.get("risk", "high"), manual=bool(t.get("manual", False)),
+                               undoes=list(t.get("undoes") or []))
                   for t in data["teardown"]],
         maintainer=str(data["maintainer"]).strip(),
         last_verified=parse_date(data["last_verified"]).isoformat(),
@@ -337,15 +356,23 @@ def load_blueprint_file(folder: Path) -> Blueprint:
     if not file.is_file():
         raise BlueprintNotFound(f"no blueprint.yaml in '{folder}'")
     try:
-        data = yaml.safe_load(file.read_text(encoding="utf-8"))
+        data = safe_load_blueprint_text(file.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         raise BlueprintValidationError(folder.name, [f"YAML parse error: {exc}"]) from exc
+    except UnicodeDecodeError as exc:
+        raise BlueprintValidationError(folder.name, [f"blueprint.yaml is not UTF-8 text ({exc.reason})"]) from exc
+    except (ValueError, RecursionError, OSError) as exc:
+        raise BlueprintValidationError(folder.name, [f"cannot read blueprint.yaml: {exc}"]) from exc
     errors = validate_blueprint_data(data, folder.name)
     guide = folder / "GUIDE.md"
     if not guide.is_file():
         errors.append("missing GUIDE.md next to blueprint.yaml")
-    elif re.search(r"\bTODO\b", guide.read_text(encoding="utf-8")):
-        errors.append("GUIDE.md still contains TODO placeholders")
+    else:
+        try:
+            if re.search(r"\bTODO\b", guide.read_text(encoding="utf-8")):
+                errors.append("GUIDE.md still contains TODO placeholders")
+        except (UnicodeDecodeError, OSError) as exc:
+            errors.append(f"GUIDE.md cannot be read as UTF-8 text ({exc})")
     if errors:
         raise BlueprintValidationError(folder.name, errors)
     return blueprint_from_data(data, folder)
@@ -394,8 +421,14 @@ def check_value(var: Variable, value: str) -> None:
         value = str(value)
     if value == "":
         raise VariableError(f"variable '{var.key}' cannot be empty")
-    if any(ord(c) < 32 or ord(c) == 127 for c in value):
-        raise VariableError(f"variable '{var.key}' contains control characters or newlines")
+    if len(value) > MAX_VALUE_LENGTH:
+        raise VariableError(f"variable '{var.key}' is {len(value)} characters long (max {MAX_VALUE_LENGTH})")
+    bad = sorted({f"U+{ord(c):04X}" for c in value if unicodedata.category(c) in FORBIDDEN_VALUE_CATEGORIES})
+    if bad:
+        raise VariableError(f"variable '{var.key}' contains control characters, newlines or invisible/bidi characters ({', '.join(bad[:5])}); "
+                            "these could hide what a command really does")
+    if value != value.strip():
+        raise VariableError(f"variable '{var.key}' has leading or trailing whitespace")
     if value.startswith("-"):
         raise VariableError(f"variable '{var.key}' cannot start with '-' (it could be read as a flag)")
     if "{{" in value or "}}" in value:
@@ -508,6 +541,7 @@ class PlannedTeardown:
     risk: str
     manual: bool
     argv: Optional[list[str]]
+    undoes: list[str] = field(default_factory=list)
 
     @property
     def command(self) -> Optional[str]:
@@ -515,7 +549,7 @@ class PlannedTeardown:
 
     def to_dict(self) -> dict:
         return {"id": self.id, "description": self.description, "risk": self.risk, "manual": self.manual,
-                "command": self.command, "argv": self.argv}
+                "command": self.command, "argv": self.argv, "undoes": list(self.undoes)}
 
 
 @dataclass
@@ -600,7 +634,8 @@ def build_plan(bp: Blueprint, provided: Optional[Mapping[str, Any]] = None,
             skip_if_expect=render_text(s.skip_if_expect, values) if s.skip_if_expect else None,
         ))
     teardown = [PlannedTeardown(id=t.id, description=render_text(t.description, values), risk=t.risk,
-                                manual=t.manual, argv=render_argv(t.command, values) if t.command else None)
+                                manual=t.manual, argv=render_argv(t.command, values) if t.command else None,
+                                undoes=list(t.undoes))
                 for t in bp.teardown]
     return Plan(blueprint=bp, variables=values, steps=steps, teardown=teardown,
                 tools=check_tools(bp.required_tools(), which))
@@ -614,46 +649,133 @@ def resolve_state_path(state_dir: Optional[str | os.PathLike] = None) -> Path:
     return Path(base).expanduser() / "state.json"
 
 
+def _lock_fd(fd: int) -> None:
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - Windows
+        try:
+            import msvcrt
+        except ImportError:
+            return
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+        return
+    fcntl.flock(fd, fcntl.LOCK_EX)
+
+
+def _unlock_fd(fd: int) -> None:
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - Windows
+        try:
+            import msvcrt
+        except ImportError:
+            return
+        with contextlib.suppress(OSError):
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+        return
+    fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+def _check_run_shape(run: Any, where: str) -> None:
+    if not isinstance(run, dict):
+        raise StateError(f"{where} is not an object")
+    if not isinstance(run.get("run_id"), str) or not run["run_id"]:
+        raise StateError(f"{where} has no run_id")
+    for key in ("steps", "teardown"):
+        items = run.get(key, [])
+        if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
+            raise StateError(f"{where} ('{run['run_id']}') has a malformed '{key}' list")
+    if not isinstance(run.get("variables", {}), dict):
+        raise StateError(f"{where} ('{run['run_id']}') has malformed variables")
+
+
 class StateStore:
-    """``.doogle/state.json``: an append-only list of run records."""
+    """``.doogle/state.json``: a list of run records.
+
+    Writes are atomic (temp file + ``os.replace``), the file is created ``0600`` inside a
+    ``0700`` directory, the previous version is kept as ``state.json.bak``, and every
+    read-modify-write holds an exclusive lock so concurrent ``doogle`` processes cannot
+    lose each other's runs.
+    """
 
     def __init__(self, path: Path):
         self.path = Path(path)
 
+    @property
+    def backup_path(self) -> Path:
+        return self.path.with_name(self.path.name + ".bak")
+
+    def _ensure_dir(self) -> None:
+        parent = self.path.parent
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+            with contextlib.suppress(OSError):
+                os.chmod(parent, 0o700)
+        ignore = parent / ".gitignore"
+        if not ignore.exists():
+            ignore.write_text("# Created by doogle: never commit run state.\n*\n", encoding="utf-8")
+
+    @contextlib.contextmanager
+    def _locked(self) -> Iterator[None]:
+        self._ensure_dir()
+        fd = os.open(self.path.parent / ".state.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            _lock_fd(fd)
+            yield
+        finally:
+            with contextlib.suppress(OSError):
+                _unlock_fd(fd)
+            os.close(fd)
+
     def load(self) -> dict:
         if not self.path.exists():
             return {"state_version": STATE_VERSION, "runs": []}
+        hint = (f"; a previous copy is at '{self.backup_path}'" if self.backup_path.exists() else "")
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise StateError(f"state file '{self.path}' is not valid JSON ({exc}); "
-                             "move it aside to start fresh") from exc
+                             f"move it aside to start fresh{hint}") from exc
+        except OSError as exc:
+            raise StateError(f"cannot read state file '{self.path}': {exc}") from exc
         if not isinstance(data, dict) or not isinstance(data.get("runs"), list):
-            raise StateError(f"state file '{self.path}' has an unexpected structure")
+            raise StateError(f"state file '{self.path}' has an unexpected structure{hint}")
+        version = data.get("state_version", STATE_VERSION)
+        if not isinstance(version, int) or version > STATE_VERSION:
+            raise StateError(f"state file '{self.path}' was written by a newer doogle "
+                             f"(state_version {version!r}); upgrade doogle to read it")
+        for i, run in enumerate(data["runs"]):
+            _check_run_shape(run, f"state file '{self.path}': runs[{i}]")
         return data
 
     def _write(self, data: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        ignore = self.path.parent / ".gitignore"
-        if not ignore.exists():
-            ignore.write_text("# Created by doogle: never commit run state.\n*\n", encoding="utf-8")
+        self._ensure_dir()
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".state.", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(data, fh, indent=2, sort_keys=False)
                 fh.write("\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            with contextlib.suppress(OSError):
+                os.chmod(tmp, 0o600)
+            if self.path.exists():
+                with contextlib.suppress(OSError):
+                    shutil.copy2(self.path, self.backup_path)
+                    os.chmod(self.backup_path, 0o600)
             os.replace(tmp, self.path)
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
 
     def runs(self) -> list[dict]:
-        return self.load()["runs"]
+        runs: list[dict] = self.load()["runs"]
+        return runs
 
     def get(self, run_id: str) -> dict:
         runs = self.runs()
         if not runs:
-            raise StateError(f"no runs recorded in '{self.path}'")
+            raise StateError(f"no runs recorded in '{self.path}' (runs are recorded by 'doogle plan <id> --apply')")
         if run_id == "latest":
             return runs[-1]
         matches = [r for r in runs if r["run_id"] == run_id or r["run_id"].startswith(run_id)]
@@ -661,17 +783,19 @@ class StateStore:
             return matches[0]
         if not matches:
             raise StateError(f"no run '{run_id}' in '{self.path}' (see: doogle history)")
-        raise StateError(f"run id prefix '{run_id}' is ambiguous")
+        raise StateError(f"run id prefix '{run_id}' is ambiguous ({len(matches)} runs match; use more characters)")
 
     def save_run(self, run: dict) -> None:
-        data = self.load()
-        for i, existing in enumerate(data["runs"]):
-            if existing["run_id"] == run["run_id"]:
-                data["runs"][i] = run
-                break
-        else:
-            data["runs"].append(run)
-        self._write(data)
+        _check_run_shape(run, "run record")
+        with self._locked():
+            data = self.load()
+            for i, existing in enumerate(data["runs"]):
+                if existing["run_id"] == run["run_id"]:
+                    data["runs"][i] = run
+                    break
+            else:
+                data["runs"].append(run)
+            self._write(data)
 
 
 # --------------------------------------------------------------------------- execution
@@ -688,19 +812,55 @@ class CommandResult:
 
 
 def subprocess_runner(argv: Sequence[str], timeout: int) -> CommandResult:
-    """Run argv without a shell, streaming nothing; capture output."""
+    """Run argv without a shell (never ``shell=True``); capture output as UTF-8 with replacement."""
     try:
-        proc = subprocess.run(list(argv), capture_output=True, text=True, timeout=timeout,
-                              stdin=subprocess.DEVNULL)
+        proc = subprocess.run(list(argv), capture_output=True, text=True, encoding="utf-8",  # noqa: S603
+                              errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, check=False)
     except FileNotFoundError:
         return CommandResult(127, "", f"command not found: {argv[0]}")
     except subprocess.TimeoutExpired:
         return CommandResult(124, "", f"timed out after {timeout}s")
+    except OSError as exc:
+        return CommandResult(126, "", f"cannot run {argv[0]}: {exc}")
     return CommandResult(proc.returncode, proc.stdout or "", proc.stderr or "")
 
 
+# Secrets that CLIs sometimes echo. Output tails are redacted before they are printed or stored.
+_EMAIL_RE = re.compile(
+    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@(?![A-Za-z0-9.-]*gserviceaccount\.com\b)"
+    r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
+REDACTIONS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\Z)", re.S),
+     "<redacted:private-key>"),
+    (re.compile(r"AIza[0-9A-Za-z_\-]{35}"), "<redacted:google-api-key>"),
+    (re.compile(r"ya29\.[0-9A-Za-z_\-.]+"), "<redacted:oauth-token>"),
+    (re.compile(r"1//[0-9A-Za-z_\-]{20,}"), "<redacted:refresh-token>"),
+    (re.compile(r"GOCSPX-[0-9A-Za-z_\-]{10,}"), "<redacted:client-secret>"),
+    (re.compile(r"eyJ[0-9A-Za-z_\-]{8,}\.[0-9A-Za-z_\-]{8,}\.[0-9A-Za-z_\-]{8,}"), "<redacted:jwt>"),
+    (re.compile(r"(?:gh[pousr]_[0-9A-Za-z]{30,}|github_pat_[0-9A-Za-z_]{40,})"), "<redacted:github-token>"),
+    (re.compile(r"(?:sk-[0-9A-Za-z_\-]{20,}|xox[abposr]-[0-9A-Za-z\-]{10,})"), "<redacted:token>"),
+    (re.compile(r"(?i)(authorization:\s*(?:bearer|basic)\s+)\S+"), r"\1<redacted>"),
+    (re.compile(r"""(?i)(["']?(?:access_token|refresh_token|id_token|client_secret|private_key(?:_id)?|"""
+                r"""api[_-]?key|password|passwd|secret|token)["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}&]+)"""),
+     r"\1<redacted>"),
+    (re.compile(r"(?i)([?&](?:token|key|access_token|sig|signature|code)=)[^&\s\"']+"), r"\1<redacted>"),
+    (_EMAIL_RE, "<redacted:email>"),
+]
+
+
+def redact(text: str) -> str:
+    """Mask tokens, keys, private keys and personal email addresses (service-account emails are kept)."""
+    for pattern, repl in REDACTIONS:
+        text = pattern.sub(repl, text)
+    return text
+
+
 def _tail(text: str, lines: int = 15) -> str:
-    return "\n".join((text or "").strip().splitlines()[-lines:])
+    return redact("\n".join((text or "").strip().splitlines()[-lines:]))[-4000:]
+
+
+def _output(result: CommandResult, lines: int = 15) -> str:
+    return _tail(result.stdout + ("\n" + result.stderr if result.stderr else ""), lines)
 
 
 def new_run_record(plan: Plan, mode: str = "apply") -> dict:
@@ -760,6 +920,39 @@ def enforce_gates(*, tools: Mapping[str, Optional[str]], high_risk: Sequence[str
         raise SafetyGateError(f"{what} cancelled at the confirmation prompt. Nothing was run.")
 
 
+# Step statuses meaning Doogle may have created (part of) a resource in this run.
+TOUCHED_STATUSES = {"succeeded", "failed", "verify_failed", "running", "interrupted"}
+
+
+def teardown_preview(run: dict) -> list[dict]:
+    """Decide, per recorded teardown entry, whether it would run and why.
+
+    An entry that declares ``undoes: [step ids]`` only runs if at least one of those steps was
+    actually executed by this run. Steps skipped by ``skip_if`` (the resource already existed)
+    or never reached do not count, so teardown never deletes something Doogle did not create.
+    """
+    steps = {s.get("id"): s for s in run.get("steps") or [] if isinstance(s, dict)}
+    out = []
+    for t in run.get("teardown") or []:
+        entry = {"id": t.get("id"), "run": bool(t.get("argv")), "reason": None}
+        if not t.get("argv"):
+            entry["reason"] = "manual"
+        else:
+            undoes = t.get("undoes") or []
+            if undoes:
+                touched = [u for u in undoes if u in steps and steps[u].get("status") in TOUCHED_STATUSES
+                           and not steps[u].get("skip_reason")]
+                if not touched:
+                    entry["run"] = False
+                    states = ", ".join(f"{u}={(steps.get(u) or {}).get('status', 'missing')}"
+                                       + (" (already existed)" if (steps.get(u) or {}).get("skip_reason") else "")
+                                       for u in undoes)
+                    entry["reason"] = (f"not created by this run ({states}); skipped so Doogle never deletes "
+                                       "resources it did not create")
+        out.append(entry)
+    return out
+
+
 class Executor:
     """Runs a plan step by step, persisting state after every transition."""
 
@@ -767,7 +960,7 @@ class Executor:
                  on_event: Optional[Callable[[str, dict], None]] = None,
                  confirm_manual: Optional[Callable[[dict], bool]] = None):
         self.store = store
-        self.runner = runner or (lambda argv, timeout: subprocess_runner(argv, timeout))
+        self.runner: Runner = runner or subprocess_runner
         self.on_event = on_event or (lambda kind, payload: None)
         self.confirm_manual = confirm_manual
 
@@ -782,20 +975,32 @@ class Executor:
         return self._execute(run, assume_manual_done=set())
 
     def resume(self, run: dict, plan: Plan, gates: Gates) -> dict:
-        if run["status"] == "succeeded":
+        _check_run_shape(run, "run")
+        if run.get("status") == "succeeded":
             raise StateError(f"run {run['run_id']} already succeeded; nothing to resume")
         if run.get("teardown_status") not in (None, "not_run"):
             raise StateError(f"run {run['run_id']} has been torn down; start a new run instead")
-        recorded = [s["id"] for s in run["steps"]]
+        recorded = [s.get("id") for s in run["steps"]]
         if recorded != [s.id for s in plan.steps]:
             raise StateError("the blueprint's steps changed since this run was recorded; start a new run")
-        pending_high = [s["id"] for s in run["steps"] if s["risk"] == "high" and s["status"] != "succeeded"]
+        # Never execute commands read back from disk: re-render them from the blueprint and the
+        # recorded variables, and refuse if what is on disk differs (edited state or changed blueprint).
+        for rec, planned in zip(run["steps"], plan.steps):
+            fresh = {"argv": planned.argv, "verify_argv": planned.verify_argv, "skip_argv": planned.skip_argv}
+            if rec.get("status") != "succeeded" and any(rec.get(k) != v for k, v in fresh.items()):
+                raise StateError(f"step '{rec['id']}' recorded in run {run['run_id']} no longer matches the "
+                                 f"blueprint '{plan.blueprint.id}' (the state file was edited or the blueprint "
+                                 "changed). Nothing was run; start a new run with 'doogle plan ... --apply'.")
+            rec.update(fresh, risk=planned.risk, manual=planned.manual, verify_expect=planned.verify_expect,
+                       skip_if_expect=planned.skip_if_expect, public_exposure=planned.public_exposure,
+                       timeout_seconds=planned.timeout_seconds)
+        pending_high = [s["id"] for s in run["steps"] if s["risk"] == "high" and s.get("status") != "succeeded"]
         enforce_gates(tools=plan.tools, high_risk=pending_high, gates=gates,
                       summary=f"Resume run {run['run_id']}?", what="resume")
-        paused_manual = {s["id"] for s in run["steps"] if s["status"] == "awaiting_manual"}
+        paused_manual = {s["id"] for s in run["steps"] if s.get("status") == "awaiting_manual"}
         for s in run["steps"]:
-            if s["status"] != "succeeded":
-                s.update(status="pending", exit_code=None, verify_status=None, output_tail=None)
+            if s.get("status") != "succeeded":
+                s.update(status="pending", exit_code=None, verify_status=None, output_tail=None, skip_reason=None)
         run.update(status="running", finished_at=None, resumed_at=utc_now())
         self.store.save_run(run)
         return self._execute(run, assume_manual_done=paused_manual)
@@ -811,87 +1016,144 @@ class Executor:
         return run
 
     def _execute(self, run: dict, assume_manual_done: set[str]) -> dict:
-        for step in run["steps"]:
-            if step["status"] == "succeeded":
-                continue
-            step["status"] = "running"
-            step["started_at"] = utc_now()
+        current: Optional[dict] = None
+        try:
+            for step in run["steps"]:
+                if step["status"] == "succeeded":
+                    continue
+                current = step
+                result = self._run_step(run, step, assume_manual_done)
+                if result is not None:
+                    return result
+            current = None
+            return self._finish(run, "succeeded")
+        except KeyboardInterrupt:
+            if current is not None:
+                current["status"] = "interrupted"
+                current["finished_at"] = utc_now()
+            run["status"] = "interrupted"
+            run["finished_at"] = utc_now()
             self.store.save_run(run)
-            self._emit("step_started", step)
+            self._emit("run_finished", run)
+            raise
 
-            if step["manual"]:
-                done = step["id"] in assume_manual_done or (
-                    self.confirm_manual is not None and self.confirm_manual(step))
-                step["finished_at"] = utc_now()
-                if not done:
-                    step["status"] = "awaiting_manual"
-                    self._emit("step_finished", step)
-                    return self._finish(run, "paused")
-                step["status"] = "succeeded"
-                self.store.save_run(run)
+    def _run_step(self, run: dict, step: dict, assume_manual_done: set[str]) -> Optional[dict]:
+        """Execute one step. Returns the finished run if the run stops here, else None."""
+        step["status"] = "running"
+        step["started_at"] = utc_now()
+        self.store.save_run(run)
+        self._emit("step_started", step)
+
+        if step["manual"]:
+            done = step["id"] in assume_manual_done or (
+                self.confirm_manual is not None and self.confirm_manual(step))
+            step["finished_at"] = utc_now()
+            if not done:
+                step["status"] = "awaiting_manual"
                 self._emit("step_finished", step)
-                continue
+                return self._finish(run, "paused")
+            step["status"] = "succeeded"
+            self.store.save_run(run)
+            self._emit("step_finished", step)
+            return None
 
-            already = False
-            if step.get("skip_argv"):
-                sres = self.runner(step["skip_argv"], 120)
-                expect = step.get("skip_if_expect")
-                already = sres.returncode == 0 and (not expect or expect in sres.stdout)
-            if already:
-                step["skip_reason"] = "already done: skip_if check matched, command not run"
-                result = CommandResult(0, "", "")
-            else:
-                result = self.runner(step["argv"], step.get("timeout_seconds") or 1800)
-            step["exit_code"] = result.returncode
-            step["output_tail"] = _tail(result.stdout + ("\n" + result.stderr if result.stderr else ""))
-            if result.returncode != 0:
-                step["status"] = "failed"
+        already = False
+        if step.get("skip_argv"):
+            sres = self.runner(step["skip_argv"], 120)
+            expect = step.get("skip_if_expect")
+            already = sres.returncode == 0 and (not expect or expect in sres.stdout)
+        if already:
+            step["skip_reason"] = "already done: skip_if check matched, command not run"
+            result = CommandResult(0, "", "")
+        else:
+            result = self.runner(step["argv"], step.get("timeout_seconds") or 1800)
+        step["exit_code"] = result.returncode
+        step["output_tail"] = _output(result)
+        if result.returncode != 0:
+            step["status"] = "failed"
+            step["finished_at"] = utc_now()
+            self._emit("step_finished", step)
+            return self._finish(run, "failed")
+
+        if step["verify_argv"]:
+            vres = self.runner(step["verify_argv"], 120)
+            ok = vres.returncode == 0 and (not step["verify_expect"] or step["verify_expect"] in vres.stdout)
+            step["verify_status"] = "passed" if ok else "failed"
+            step["verify_output_tail"] = _output(vres, 5)
+            if not ok:
+                step["status"] = "verify_failed"
                 step["finished_at"] = utc_now()
                 self._emit("step_finished", step)
                 return self._finish(run, "failed")
-
-            if step["verify_argv"]:
-                vres = self.runner(step["verify_argv"], 120)
-                ok = vres.returncode == 0 and (not step["verify_expect"] or step["verify_expect"] in vres.stdout)
-                step["verify_status"] = "passed" if ok else "failed"
-                step["verify_output_tail"] = _tail(vres.stdout + ("\n" + vres.stderr if vres.stderr else ""), 5)
-                if not ok:
-                    step["status"] = "verify_failed"
-                    step["finished_at"] = utc_now()
-                    self._emit("step_finished", step)
-                    return self._finish(run, "failed")
-            else:
-                step["verify_status"] = "not_defined"
-            step["status"] = "succeeded"
-            step["finished_at"] = utc_now()
-            self.store.save_run(run)
-            self._emit("step_finished", step)
-        return self._finish(run, "succeeded")
+        else:
+            step["verify_status"] = "not_defined"
+        step["status"] = "succeeded"
+        step["finished_at"] = utc_now()
+        self.store.save_run(run)
+        self._emit("step_finished", step)
+        return None
 
     def teardown(self, run: dict, gates: Gates, tools: Optional[Mapping[str, Optional[str]]] = None,
-                 which: Optional[Callable[[str], Optional[str]]] = None) -> dict:
+                 which: Optional[Callable[[str], Optional[str]]] = None,
+                 expected: Optional[Sequence[PlannedTeardown]] = None) -> dict:
+        """Run the recorded teardown. ``expected`` (re-rendered from the current blueprint) is
+        compared with what is on disk; differences are reported as warnings."""
+        _check_run_shape(run, "run")
         entries = run.get("teardown") or []
-        automated = [t for t in entries if t.get("argv")]
+        preview = {p["id"]: p for p in teardown_preview(run)}
+        automated = [t for t in entries if t.get("argv") and preview.get(t.get("id"), {}).get("run")]
+        problems = [p for t in automated for p in recorded_argv_problems(t["argv"], f"teardown '{t.get('id')}'")]
+        if problems:
+            raise StateError("refusing to tear down: the state file contains commands Doogle would never "
+                             "generate (was it edited?): " + "; ".join(problems) + ". Nothing was run.")
+        warnings = []
+        if expected is not None:
+            want = {t.id: t.argv for t in expected}
+            for t in automated:
+                if t.get("id") in want and want[t["id"]] != t["argv"]:
+                    warnings.append(f"teardown '{t['id']}' differs from the current blueprint; running the "
+                                    "recorded command")
         if tools is None:
             tools = check_tools([t["argv"][0] for t in automated], which)
-        high = [t["id"] for t in automated if t["risk"] == "high"]
+        high = [t["id"] for t in automated if t.get("risk", "high") == "high"]
         enforce_gates(tools=tools, high_risk=high, gates=gates,
                       summary=f"Tear down run {run['run_id']} ({len(automated)} commands)?", what="teardown")
+        run["teardown_warnings"] = warnings
         failures = 0
-        for t in entries:
-            if not t.get("argv"):
-                t["status"] = "manual_required"
-                continue
-            self._emit("teardown_started", t)
-            res = self.runner(t["argv"], 1800)
-            t["exit_code"] = res.returncode
-            t["finished_at"] = utc_now()
-            t["status"] = "succeeded" if res.returncode == 0 else "failed"
-            t["output_tail"] = _tail(res.stdout + ("\n" + res.stderr if res.stderr else ""), 5)
-            failures += res.returncode != 0
+        current: Optional[dict] = None
+        try:
+            for t in entries:
+                if not t.get("argv"):
+                    t["status"] = "manual_required"
+                    continue
+                if not preview.get(t.get("id"), {}).get("run"):
+                    t["status"] = "skipped_not_created"
+                    t["skip_reason"] = preview.get(t.get("id"), {}).get("reason")
+                    self._emit("teardown_skipped", t)
+                    continue
+                current = t
+                self._emit("teardown_started", t)
+                res = self.runner(t["argv"], 1800)
+                t["exit_code"] = res.returncode
+                t["finished_at"] = utc_now()
+                t["status"] = "succeeded" if res.returncode == 0 else "failed"
+                t["output_tail"] = _output(res, 5)
+                failures += res.returncode != 0
+                self.store.save_run(run)
+                self._emit("teardown_finished", t)
+            current = None
+        except KeyboardInterrupt:
+            if current is not None:
+                current["status"] = "interrupted"
+            run["teardown_status"] = "interrupted"
+            run["teardown_finished_at"] = utc_now()
             self.store.save_run(run)
-            self._emit("teardown_finished", t)
-        run["teardown_status"] = "succeeded" if failures == 0 else ("failed" if failures == len(automated) else "partial")
+            raise
+        if not automated:
+            run["teardown_status"] = "nothing_to_run"
+        else:
+            run["teardown_status"] = ("succeeded" if failures == 0
+                                      else ("failed" if failures == len(automated) else "partial"))
         run["teardown_finished_at"] = utc_now()
         self.store.save_run(run)
         return run

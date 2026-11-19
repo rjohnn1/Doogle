@@ -36,7 +36,7 @@ def minimal_data(**overrides) -> dict:
         "maintainer": "@someone",
         "last_verified": "2026-01-15",
         "verification_status": "simulated",
-        "verified_versions": {"tool1": "1.2.3", "tool2": "unverified"},
+        "verified_versions": {"gcloud": "1.2.3", "firebase": "unverified"},
         "keywords": ["demo"],
         "when_to_use": ["testing"],
         "when_not_to_use": ["production: use something simpler"],
@@ -45,12 +45,13 @@ def minimal_data(**overrides) -> dict:
         "variables": [{"key": "project_id", "prompt": "Project", "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"},
                       {"key": "label", "prompt": "Label", "default": "hello world"}],
         "steps": [
-            {"id": "one", "description": "first", "command": "tool1 create {{project_id}} --label {{label}}",
-             "risk": "low", "verify_command": "tool1 describe {{project_id}}", "verify_expect": "{{project_id}}"},
-            {"id": "two", "description": "second", "command": "tool2 deploy {{project_id}}", "risk": "high",
+            {"id": "one", "description": "first", "command": "gcloud create {{project_id}} --label {{label}}",
+             "risk": "low", "verify_command": "gcloud describe {{project_id}}", "verify_expect": "{{project_id}}"},
+            {"id": "two", "description": "second", "command": "firebase deploy {{project_id}}", "risk": "high",
              "public_exposure": True},
         ],
-        "teardown": [{"id": "undo", "description": "undo", "command": "tool1 delete {{project_id}}", "risk": "high"}],
+        "teardown": [{"id": "undo", "description": "undo", "command": "gcloud delete {{project_id}}", "risk": "high",
+                      "undoes": ["one"]}],
     }
     data.update(overrides)
     return data
@@ -143,13 +144,13 @@ def test_shipped_blueprints_use_no_shell_and_known_tools():
     (lambda d: d.update(teardown=[{"id": "x", "description": "manual", "manual": True}]), "at least one command"),
     (lambda d: d.update(steps=[]), "steps"),
     (lambda d: d["steps"][0].update(risk="extreme"), "risk must be one of"),
-    (lambda d: d["steps"][0].update(command="tool1 {{nope}}"), "not a declared variable"),
-    (lambda d: d["steps"][0].update(command="tool1 a | tool2 b"), "shell operators"),
-    (lambda d: d["steps"][0].update(command="tool1 a && tool2 b"), "shell operators"),
-    (lambda d: d["steps"][0].update(command="tool1 $(whoami)"), "substitution"),
+    (lambda d: d["steps"][0].update(command="gcloud {{nope}}"), "not a declared variable"),
+    (lambda d: d["steps"][0].update(command="gcloud a | firebase b"), "shell operators"),
+    (lambda d: d["steps"][0].update(command="gcloud a && firebase b"), "shell operators"),
+    (lambda d: d["steps"][0].update(command="gcloud $(whoami)"), "substitution"),
     (lambda d: d["steps"][0].update(command="bash -c 'echo hi'"), "not an allowed tool"),
-    (lambda d: d["steps"][0].update(command="sudo tool1"), "not an allowed tool"),
-    (lambda d: d["steps"][0].update(command="/usr/bin/tool1 x"), "bare tool name"),
+    (lambda d: d["steps"][0].update(command="sudo gcloud"), "not an allowed tool"),
+    (lambda d: d["steps"][0].update(command="/usr/bin/gcloud x"), "bare tool name"),
     (lambda d: d["steps"][0].update(command="gcloud projects delete {{project_id}}", risk="high"), "never be automated"),
     (lambda d: d["steps"][0].update(command="gcloud run services delete x", risk="low"), "risk: high"),
     (lambda d: d["teardown"][0].update(risk="low"), "risk: high"),
@@ -164,7 +165,7 @@ def test_shipped_blueprints_use_no_shell_and_known_tools():
     (lambda d: d["variables"][1].update(pattern="^[0-9]+$"), "does not match its pattern"),
     (lambda d: d["steps"][0].pop("verify_command"), "verify_expect requires verify_command"),
     (lambda d: d["steps"][0].update(manual=True), "manual steps must not define"),
-    (lambda d: d["steps"][0].update(verify_command="tool1 delete x"), "read-only"),
+    (lambda d: d["steps"][0].update(verify_command="gcloud delete x"), "read-only"),
 ])
 def test_validator_rejects(mutate, needle):
     data = copy.deepcopy(minimal_data())
@@ -224,8 +225,8 @@ def test_resolve_default_works_from_any_cwd(tmp_path, monkeypatch):
 
 
 def test_render_keeps_hostile_value_in_one_argv_token():
-    argv = E.render_argv("tool1 --label {{label}} end", {"label": "a b; rm -rf / && $(x) `y`"})
-    assert argv == ["tool1", "--label", "a b; rm -rf / && $(x) `y`", "end"]
+    argv = E.render_argv("gcloud --label {{label}} end", {"label": "a b; rm -rf / && $(x) `y`"})
+    assert argv == ["gcloud", "--label", "a b; rm -rf / && $(x) `y`", "end"]
     shown = E.display(argv)
     assert E.shlex.split(shown) == argv  # display form is safely shell-quoted
     assert "'a b; rm -rf / && $(x) `y`'" in shown
@@ -238,7 +239,7 @@ def test_render_inside_quoted_template_token():
 
 def test_render_rejects_unresolved_placeholder():
     with pytest.raises(E.VariableError, match="unresolved placeholder"):
-        E.render_argv("tool1 {{missing}}", {})
+        E.render_argv("gcloud {{missing}}", {})
     with pytest.raises(E.VariableError, match="unresolved"):
         E.render_text("hello {{who}}", {})
 
@@ -275,13 +276,13 @@ def test_plan_is_pure_and_complete(tmp_path, monkeypatch):
     d = plan.to_dict()
     assert d["mode"] == "dry-run"
     assert d["variables"] == {"project_id": "demo-project", "label": "hello world"}
-    assert d["steps"][0]["argv"] == ["tool1", "create", "demo-project", "--label", "hello world"]
-    assert d["steps"][0]["command"] == "tool1 create demo-project --label 'hello world'"
+    assert d["steps"][0]["argv"] == ["gcloud", "create", "demo-project", "--label", "hello world"]
+    assert d["steps"][0]["command"] == "gcloud create demo-project --label 'hello world'"
     assert d["steps"][0]["verify_expect"] == "demo-project"
     assert d["summary"]["high_risk_steps"] == ["two"]
     assert d["summary"]["public_exposure_steps"] == ["two"]
-    assert d["summary"]["missing_tools"] == ["tool1", "tool2"]
-    assert d["teardown"][0]["command"] == "tool1 delete demo-project"
+    assert d["summary"]["missing_tools"] == ["firebase", "gcloud"]
+    assert d["teardown"][0]["command"] == "gcloud delete demo-project"
     json.dumps(d)  # serialisable
     assert not (tmp_path / ".doogle").exists()  # planning never writes state
 
@@ -347,10 +348,10 @@ def test_successful_run_records_everything(store):
     assert run["steps"][1]["verify_status"] == "not_defined"
     assert all(s["started_at"] and s["finished_at"] for s in run["steps"])
     assert run["variables"]["project_id"] == "demo-project"
-    assert run["teardown"][0]["argv"] == ["tool1", "delete", "demo-project"]
-    assert runner.calls == [["tool1", "create", "demo-project", "--label", "hello world"],
-                            ["tool1", "describe", "demo-project"],
-                            ["tool2", "deploy", "demo-project"]]
+    assert run["teardown"][0]["argv"] == ["gcloud", "delete", "demo-project"]
+    assert runner.calls == [["gcloud", "create", "demo-project", "--label", "hello world"],
+                            ["gcloud", "describe", "demo-project"],
+                            ["firebase", "deploy", "demo-project"]]
     on_disk = json.loads(store.path.read_text())
     assert on_disk["state_version"] == E.STATE_VERSION
     assert on_disk["runs"][0]["run_id"] == run["run_id"]
@@ -358,7 +359,7 @@ def test_successful_run_records_everything(store):
 
 
 def test_failure_stops_and_skips_remaining(store):
-    runner = FakeRunner({("tool1", "create"): E.CommandResult(1, "", "boom: bad project")})
+    runner = FakeRunner({("gcloud", "create"): E.CommandResult(1, "", "boom: bad project")})
     run = E.Executor(store, runner).apply(_plan(), E.Gates(yes=True, approve_high_risk=True))
     assert run["status"] == "failed"
     assert [s["status"] for s in run["steps"]] == ["failed", "skipped"]
@@ -367,7 +368,7 @@ def test_failure_stops_and_skips_remaining(store):
 
 
 def test_verify_expectation_failure_marks_step(store):
-    runner = FakeRunner({("tool1", "describe"): E.CommandResult(0, "something else", "")})
+    runner = FakeRunner({("gcloud", "describe"): E.CommandResult(0, "something else", "")})
     run = E.Executor(store, runner).apply(_plan(), E.Gates(yes=True, approve_high_risk=True))
     assert run["status"] == "failed"
     assert run["steps"][0]["status"] == "verify_failed"
@@ -376,7 +377,7 @@ def test_verify_expectation_failure_marks_step(store):
 
 
 def test_resume_skips_succeeded_steps(store):
-    runner = FakeRunner({("tool2", "deploy"): E.CommandResult(2, "", "quota")})
+    runner = FakeRunner({("firebase", "deploy"): E.CommandResult(2, "", "quota")})
     ex = E.Executor(store, runner)
     run = ex.apply(_plan(), E.Gates(yes=True, approve_high_risk=True))
     assert run["status"] == "failed"
@@ -384,12 +385,12 @@ def test_resume_skips_succeeded_steps(store):
     run2 = E.Executor(store, runner2).resume(store.get(run["run_id"]), _plan(),
                                              E.Gates(yes=True, approve_high_risk=True))
     assert run2["status"] == "succeeded" and run2["run_id"] == run["run_id"]
-    assert runner2.calls == [["tool2", "deploy", "demo-project"]]
+    assert runner2.calls == [["firebase", "deploy", "demo-project"]]
     assert len(store.runs()) == 1
 
 
 def test_resume_still_requires_high_risk_approval(store):
-    runner = FakeRunner({("tool2", "deploy"): E.CommandResult(2, "", "x")})
+    runner = FakeRunner({("firebase", "deploy"): E.CommandResult(2, "", "x")})
     run = E.Executor(store, runner).apply(_plan(), E.Gates(yes=True, approve_high_risk=True))
     with pytest.raises(E.SafetyGateError):
         E.Executor(store, FakeRunner()).resume(run, _plan(), E.Gates(yes=True))
@@ -406,7 +407,7 @@ def test_manual_step_pauses_then_resumes(store):
     runner = FakeRunner()
     run = E.Executor(store, runner).resume(store.get("latest"), plan, E.Gates(yes=True, approve_high_risk=True))
     assert run["status"] == "succeeded"
-    assert runner.calls == [["tool2", "deploy", "demo-project"]]
+    assert runner.calls == [["firebase", "deploy", "demo-project"]]
 
 
 def test_manual_step_interactive_confirmation(store):
@@ -443,18 +444,18 @@ def test_teardown_from_state(store):
     runner = FakeRunner()
     run = E.Executor(store, runner).teardown(store.get(run["run_id"]),
                                              E.Gates(yes=True, approve_high_risk=True), which=ALL_TOOLS)
-    assert runner.calls == [["tool1", "delete", "demo-project"]]
+    assert runner.calls == [["gcloud", "delete", "demo-project"]]
     assert run["teardown_status"] == "succeeded"
     assert store.get(run["run_id"])["teardown"][0]["status"] == "succeeded"
 
 
 def test_teardown_partial_failure_continues(store):
     data = minimal_data()
-    data["teardown"].append({"id": "undo-two", "description": "x", "command": "tool2 delete {{project_id}}",
-                             "risk": "high"})
+    data["teardown"].append({"id": "undo-two", "description": "x", "command": "firebase delete {{project_id}}",
+                             "risk": "high", "undoes": ["two"]})
     plan = E.build_plan(make_bp(data), {"project_id": "demo-project"}, which=ALL_TOOLS)
     run = E.Executor(store, FakeRunner()).apply(plan, E.Gates(yes=True, approve_high_risk=True))
-    runner = FakeRunner({("tool1", "delete"): E.CommandResult(1, "", "gone")})
+    runner = FakeRunner({("gcloud", "delete"): E.CommandResult(1, "", "gone")})
     run = E.Executor(store, runner).teardown(run, E.Gates(yes=True, approve_high_risk=True), which=ALL_TOOLS)
     assert len(runner.calls) == 2 and run["teardown_status"] == "partial"
 

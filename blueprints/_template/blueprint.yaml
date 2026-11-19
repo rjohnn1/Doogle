@@ -52,3 +52,4 @@ teardown:
     description: TODO Remove what the steps created. Deletes must be risk high.
     command: gcloud run services delete TODO-service --region {{region}} --project {{project_id}} --quiet
     risk: high
+    undoes: [enable-apis]   # the step id(s) that create what this entry deletes

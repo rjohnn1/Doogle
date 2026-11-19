@@ -98,6 +98,16 @@ steps:
     skip_if_expect: '"projectId": "{{project_id}}"'
     verify_command: firebase projects:list --json
     verify_expect: '"projectId": "{{project_id}}"'
+  - id: create-hosting-site
+    description: >-
+      Create the default Firebase Hosting site {{project_id}} (skipped if it exists). Since
+      October 2026 Firebase no longer creates it automatically, and it must exist before the
+      web app is registered so the app config gets an authDomain.
+    command: firebase hosting:sites:create {{project_id}} --project {{project_id}} --non-interactive
+    risk: medium
+    skip_if: firebase hosting:sites:get {{project_id}} --project {{project_id}}
+    verify_command: firebase hosting:sites:get {{project_id}} --project {{project_id}}
+    verify_expect: "{{project_id}}"
   - id: enable-apis
     description: Enable the Firestore, Identity Toolkit (Authentication) and Firebase Hosting APIs.
     command: gcloud services enable firestore.googleapis.com identitytoolkit.googleapis.com firebasehosting.googleapis.com --project {{project_id}}
@@ -140,13 +150,15 @@ steps:
     verify_expect: "<html"
 teardown:
   - id: disable-hosting
-    description: Stop serving the site at {{project_id}}.web.app (Firebase Hosting keeps old releases until you delete the site).
+    description: Stop serving the site at {{project_id}}.web.app. The default Hosting site itself cannot be deleted; its stored releases remain until you delete them in the console.
     command: firebase hosting:disable --project {{project_id}} --force
     risk: high
+    undoes: [deploy]
   - id: delete-firestore
     description: Permanently delete the (default) Firestore database and ALL its data. Export first if you need it.
     command: gcloud firestore databases delete '--database=(default)' --project {{project_id}} --quiet
     risk: high
+    undoes: [create-firestore]
   - id: remove-auth-and-app
     description: >-
       In the Firebase console, disable the sign-in providers, delete test users (Authentication >

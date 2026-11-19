@@ -107,6 +107,7 @@ teardown:
     description: Delete all versioned deployments so the public webhook URL stops working.
     command: clasp delete-deployment --all
     risk: high
+    undoes: [deploy-webapp]
   - id: trash-sheet
     description: Move the "{{sheet_title}}" spreadsheet to Drive trash (this also removes its bound script).
     manual: true

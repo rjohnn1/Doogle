@@ -30,9 +30,10 @@ doogle plan firebase-auth-mvp --var project_id=YOUR_PROJECT_ID                  
 doogle plan firebase-auth-mvp --var project_id=YOUR_PROJECT_ID --apply --approve-high-risk
 ```
 
-`add-firebase`, `create-firestore` and `register-web-app` are **idempotent**: each has a
-read-only `skip_if` check, so re-running on a project that already has Firebase, a database or the
-app does not fail. The run pauses twice for manual steps; finish them and run
+`add-firebase`, `create-hosting-site`, `create-firestore` and `register-web-app` are **idempotent**:
+each has a read-only `skip_if` check, so re-running on a project that already has Firebase, a Hosting
+site, a database or the app does not fail. Because Doogle records which steps it actually ran,
+`doogle teardown` will **not** delete a Firestore database that already existed before your run. The run pauses twice for manual steps; finish them and run
 `doogle resume latest --approve-high-risk`.
 
 > The Firestore location (`firestore_location`, default `nam5` in the US) is **permanent**. Pick
@@ -141,8 +142,10 @@ is the usual next step; set `"public": "dist"` in `firebase.json` and build befo
 the Firestore console check it is under `users/<your uid>/notes`. Try the rules in the console's
 Rules Playground: an unauthenticated read of `users/someone` must be denied.
 
-If your default Hosting site ID differs from the project ID (it can when the ID was taken), the
-URL verify fails even though the deploy worked. Check `firebase hosting:sites:list --project
+Since 15 October 2026 Firebase creates the default Hosting site on demand instead of with the
+project, so the blueprint creates it explicitly (`create-hosting-site`, site ID = project ID) before
+registering the web app, as Firebase recommends. If your project already had a default site with a
+different ID, the URL verify fails even though the deploy worked. Check `firebase hosting:sites:list --project
 YOUR_PROJECT_ID` and open the URL it shows.
 
 ## Cost guard-rails
@@ -157,6 +160,8 @@ YOUR_PROJECT_ID` and open the URL it shows.
 | Symptom | Fix |
 |---|---|
 | `add-firebase` fails with permission denied | You need Owner (or Firebase Admin) on the project, and to accept the Firebase terms once in the console. |
+| `create-hosting-site` fails: site ID reserved or invalid | The ID `PROJECT_ID` is taken by another project. Create a site with another ID in the console (Hosting > Get started); the first site becomes the default, then `doogle resume latest --approve-high-risk`. See https://firebase.google.com/docs/hosting/default-site |
+| `firebase deploy` says there is no Hosting site | The default site does not exist yet: run `firebase hosting:sites:create PROJECT_ID --project PROJECT_ID`. |
 | `create-firestore` fails: location not available | Run `firebase firestore:locations` and pick a listed one. |
 | `auth/configuration-not-found` in the browser | The sign-in provider is not enabled (manual step 1). |
 | `auth/unauthorized-domain` | Add your domain under Authentication > Settings > Authorized domains. |
@@ -169,7 +174,9 @@ doogle teardown latest
 doogle teardown latest --apply --approve-high-risk
 ```
 
-This stops Hosting and **permanently deletes the (default) Firestore database and all its data**.
+This stops Hosting and **permanently deletes the (default) Firestore database and all its data**,
+but only if this run created it (if `create-firestore` was skipped because a database already
+existed, the delete is skipped too and `doogle teardown` tells you so).
 Export it first if needed (`gcloud firestore export gs://YOUR_BUCKET --project YOUR_PROJECT_ID`).
 Removing sign-in providers, test users and the web app registration is manual. Doogle never
 deletes projects.

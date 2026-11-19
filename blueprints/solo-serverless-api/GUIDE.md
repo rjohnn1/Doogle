@@ -80,6 +80,8 @@ curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" https://YOUR
 
 | Symptom | Fix |
 |---|---|
+| Build fails with `PERMISSION_DENIED` / `does not have permission` for the `...-compute@developer.gserviceaccount.com` account | Source builds run as the Compute Engine default service account. Grant it the builder role (find PROJECT_NUMBER with `gcloud projects describe PROJECT_ID --format='value(projectNumber)'`): `gcloud projects add-iam-policy-binding PROJECT_ID --member=serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com --role=roles/run.builder`, wait two minutes, then `doogle resume latest`. See https://cloud.google.com/run/docs/deploying-source-code#required_roles |
+| Storage keeps growing after teardown | Source archives live in the bucket `run-sources-PROJECT_ID-REGION` and images in Artifact Registry `cloud-run-source-deploy`. They are shared by all source deploys in the region, so Doogle does not delete them; remove old ones in the console. |
 | `PERMISSION_DENIED` on enable-apis | You need `roles/serviceusage.serviceUsageAdmin` or Owner on the project. |
 | Build fails: "no buildpack groups passed detection" | Add a `Dockerfile` or a recognised manifest (`requirements.txt`, `package.json`, `go.mod`...). |
 | Container failed to start / listen on port | Your app must bind `0.0.0.0:$PORT`. Check `gcloud run services logs read SERVICE --region REGION`. |

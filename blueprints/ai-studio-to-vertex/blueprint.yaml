@@ -98,6 +98,8 @@ steps:
     description: Grant only roles/aiplatform.user to the runtime service account (IAM change).
     command: gcloud projects add-iam-policy-binding {{project_id}} --member serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --role roles/aiplatform.user --condition None
     risk: high
+    skip_if: gcloud projects get-iam-policy {{project_id}} --flatten bindings[].members --filter bindings.role:roles/aiplatform.user '--format=value(bindings.members)'
+    skip_if_expect: "serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
     verify_command: gcloud projects get-iam-policy {{project_id}} --flatten bindings[].members --filter bindings.role:roles/aiplatform.user '--format=value(bindings.members)'
     verify_expect: "serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
   - id: local-adc-login
@@ -131,10 +133,12 @@ teardown:
     description: Remove the roles/aiplatform.user binding from the runtime service account.
     command: gcloud projects remove-iam-policy-binding {{project_id}} --member serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --role roles/aiplatform.user --condition None
     risk: high
+    undoes: [grant-vertex-user]
   - id: delete-service-account
     description: Delete the runtime service account {{service_account_name}}. Anything still running as it will lose access.
     command: gcloud iam service-accounts delete {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --project {{project_id}} --quiet
     risk: high
+    undoes: [create-service-account]
   - id: revert-local-and-app
     description: >-
       Locally run 'gcloud auth application-default revoke' if you no longer need ADC, and switch the

@@ -45,16 +45,16 @@ def test_validator_is_standalone_and_reexported():
     (lambda d: d.update(verification_status="tested"), "verification_status must be one of"),
     (lambda d: d.pop("verified_versions"), "verified_versions"),
     (lambda d: d.update(verified_versions={}), "non-empty mapping"),
-    (lambda d: d.update(verified_versions={"tool1": 594.0}), "quoted version string"),
-    (lambda d: d.update(verified_versions={"tool1": "latest"}), "quoted version string"),
+    (lambda d: d.update(verified_versions={"gcloud": 594.0}), "quoted version string"),
+    (lambda d: d.update(verified_versions={"gcloud": "latest"}), "quoted version string"),
     (lambda d: d.update(verified_versions={"Tool 1": "1.0"}), "invalid tool name"),
-    (lambda d: d.update(verification_status="live"), "requires a real version for 'tool2'"),
+    (lambda d: d.update(verification_status="live"), "requires a real version for 'firebase'"),
     (lambda d: d.update(verification_notes=""), "verification_notes"),
     (lambda d: d.update(tagline="TODO write this"), "TODO placeholders in: tagline"),
-    (lambda d: d["steps"][0].update(skip_if="tool1 delete x"), "skip_if must be read-only"),
+    (lambda d: d["steps"][0].update(skip_if="gcloud delete x"), "skip_if must be read-only"),
     (lambda d: d["steps"][0].update(skip_if_expect="x"), "skip_if_expect requires skip_if"),
-    (lambda d: d["steps"][0].update(skip_if="tool1 get {{nope}}"), "not a declared variable"),
-    (lambda d: d["steps"][0].update(skip_if="tool1 a | tool2"), "shell operators"),
+    (lambda d: d["steps"][0].update(skip_if="gcloud get {{nope}}"), "not a declared variable"),
+    (lambda d: d["steps"][0].update(skip_if="gcloud a | firebase"), "shell operators"),
 ])
 def test_v2_validator_rules(mutate, needle):
     data = copy.deepcopy(minimal_data())
@@ -65,11 +65,11 @@ def test_v2_validator_rules(mutate, needle):
 
 def test_yaml_date_and_aliases_accepted():
     data = minimal_data(last_verified=date(2026, 1, 15), verification_status="syntax-checked",
-                        verified_versions={"tool1": "1.0.0", "tool2": "2.3"})
+                        verified_versions={"gcloud": "1.0.0", "firebase": "2.3"})
     assert V.validate_blueprint_data(data, "demo-bp", today=TODAY) == []
     data = minimal_data(verification_status="syntax-checked",
-                        verified_versions={"tool1": "1.0", "tool2": "unverified"})
-    assert any("tool2" in e for e in V.validate_blueprint_data(data, "demo-bp", today=TODAY))
+                        verified_versions={"gcloud": "1.0", "firebase": "unverified"})
+    assert any("firebase" in e for e in V.validate_blueprint_data(data, "demo-bp", today=TODAY))
 
 
 def test_guide_with_todo_is_rejected(tmp_path):
@@ -145,24 +145,24 @@ def test_cli_explain_shows_freshness_and_warns(capsys, tmp_path):
 
 def _skip_plan():
     data = minimal_data()
-    data["steps"][0].update(skip_if="tool1 get {{project_id}}", skip_if_expect="{{project_id}}")
+    data["steps"][0].update(skip_if="gcloud get {{project_id}}", skip_if_expect="{{project_id}}")
     return E.build_plan(make_bp(data), {"project_id": "demo-project"}, which=ALL_TOOLS)
 
 
 def test_skip_if_matched_skips_command(tmp_path):
     store = E.StateStore(tmp_path / "state.json")
-    runner = FakeRunner({("tool1", "get"): E.CommandResult(0, "exists: demo-project", "")})
+    runner = FakeRunner({("gcloud", "get"): E.CommandResult(0, "exists: demo-project", "")})
     run = E.Executor(store, runner).apply(_skip_plan(), E.Gates(yes=True, approve_high_risk=True))
     assert run["status"] == "succeeded"
-    assert ["tool1", "create", "demo-project", "--label", "hello world"] not in runner.calls
+    assert ["gcloud", "create", "demo-project", "--label", "hello world"] not in runner.calls
     assert run["steps"][0]["skip_reason"] and run["steps"][0]["verify_status"] == "passed"
 
 
 def test_skip_if_not_matched_runs_command(tmp_path):
     store = E.StateStore(tmp_path / "state.json")
-    runner = FakeRunner({("tool1", "get"): E.CommandResult(1, "", "not found")})
+    runner = FakeRunner({("gcloud", "get"): E.CommandResult(1, "", "not found")})
     run = E.Executor(store, runner).apply(_skip_plan(), E.Gates(yes=True, approve_high_risk=True))
-    assert ["tool1", "create", "demo-project", "--label", "hello world"] in runner.calls
+    assert ["gcloud", "create", "demo-project", "--label", "hello world"] in runner.calls
     assert run["steps"][0]["skip_reason"] is None
 
 

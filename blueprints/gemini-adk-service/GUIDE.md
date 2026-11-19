@@ -131,6 +131,8 @@ IAM binding, env vars, privacy setting) is visible in the plan and recorded for 
 
 | Symptom | Fix |
 |---|---|
+| Build fails with `PERMISSION_DENIED` / `does not have permission` for the `...-compute@developer.gserviceaccount.com` account | Source builds run as the Compute Engine default service account. Grant it the builder role (find PROJECT_NUMBER with `gcloud projects describe PROJECT_ID --format='value(projectNumber)'`): `gcloud projects add-iam-policy-binding PROJECT_ID --member=serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com --role=roles/run.builder`, wait two minutes, then `doogle resume latest`. See https://cloud.google.com/run/docs/deploying-source-code#required_roles |
+| Storage keeps growing after teardown | Source archives live in the bucket `run-sources-PROJECT_ID-REGION` and images in Artifact Registry `cloud-run-source-deploy`. They are shared by all source deploys in the region, so Doogle does not delete them; remove old ones in the console. |
 | `403 Permission 'aiplatform.endpoints.predict' denied` | The binding has not propagated yet (wait a minute) or the service runs as a different account. |
 | Build fails with permission errors on a new project | Cloud Build's service account may need `roles/run.builder` / `roles/artifactregistry.writer`; see the Cloud Run source-deploy docs. |
 | Model not found | The model name in `agent.py` is not available in `vertex_location`; try `global` or another region. |

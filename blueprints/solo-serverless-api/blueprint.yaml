@@ -54,6 +54,8 @@ estimated_cost: >-
 prerequisites:
   - A Google Cloud project with billing enabled, and gcloud logged in (gcloud auth login).
   - Run doogle from (or point source_dir at) a folder containing your app, e.g. a main.py with requirements.txt, a package.json, or a Dockerfile.
+  - Deploying from source builds with Cloud Build as the Compute Engine default service account. In organisations created after 3 May 2024 (and any project where that account lost the Editor role) it needs roles/run.builder first, or the build fails with a permission error; see GUIDE.md > Troubleshooting for the exact command.
+  - If a Cloud Run service with the chosen name already exists in that region, the deploy step replaces its code and teardown deletes it. Pick a new service_name for experiments.
 docs:
   - https://cloud.google.com/run/docs/deploying-source-code
   - https://cloud.google.com/run/docs/authenticating/public
@@ -99,9 +101,11 @@ teardown:
     description: Delete the Cloud Run service {{service_name}} in {{region}}.
     command: gcloud run services delete {{service_name}} --region {{region}} --project {{project_id}} --quiet
     risk: high
+    undoes: [deploy-service]
   - id: review-images
     description: >-
-      Built images stay in the Artifact Registry repository 'cloud-run-source-deploy' in {{region}}
-      and are shared by every source deploy in that region. Delete old images in the console
-      (Artifact Registry > cloud-run-source-deploy) only if nothing else uses them.
+      Built images stay in the Artifact Registry repository 'cloud-run-source-deploy' in {{region}},
+      and uploaded source archives stay in the Cloud Storage bucket 'run-sources-{{project_id}}-{{region}}'.
+      Both are shared by every source deploy in that region and keep costing a little storage.
+      Delete old images and archives in the console only if nothing else uses them.
     manual: true

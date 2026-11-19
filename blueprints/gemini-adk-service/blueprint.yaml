@@ -56,6 +56,8 @@ prerequisites:
   - A Google Cloud project with billing enabled, and gcloud logged in (gcloud auth login).
   - An ADK agent folder containing a Dockerfile (GUIDE.md has a minimal working example). Test locally first with 'adk web'.
   - Permission to change IAM in the project (roles/resourcemanager.projectIamAdmin or Owner).
+  - Deploying from source builds with Cloud Build as the Compute Engine default service account. In organisations created after 3 May 2024 (and any project where that account lost the Editor role) it needs roles/run.builder first, or the build fails with a permission error; see GUIDE.md > Troubleshooting for the exact command.
+  - If a Cloud Run service with the chosen name already exists in that region, the deploy step replaces its code and teardown deletes it. Pick a new service_name for experiments.
 docs:
   - https://google.github.io/adk-docs/deploy/cloud-run/
   - https://cloud.google.com/vertex-ai/generative-ai/docs/start/quickstarts/quickstart-multimodal
@@ -112,6 +114,8 @@ steps:
     description: Grant only roles/aiplatform.user to the runtime service account (IAM change).
     command: gcloud projects add-iam-policy-binding {{project_id}} --member serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --role roles/aiplatform.user --condition None
     risk: high
+    skip_if: gcloud projects get-iam-policy {{project_id}} --flatten bindings[].members --filter bindings.role:roles/aiplatform.user '--format=value(bindings.members)'
+    skip_if_expect: "serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
     verify_command: gcloud projects get-iam-policy {{project_id}} --flatten bindings[].members --filter bindings.role:roles/aiplatform.user '--format=value(bindings.members)'
     verify_expect: "serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
   - id: deploy-agent
@@ -131,17 +135,22 @@ teardown:
     description: Delete the Cloud Run service {{service_name}}.
     command: gcloud run services delete {{service_name}} --region {{region}} --project {{project_id}} --quiet
     risk: high
+    undoes: [deploy-agent]
   - id: remove-vertex-binding
     description: Remove the roles/aiplatform.user binding from the runtime service account.
     command: gcloud projects remove-iam-policy-binding {{project_id}} --member serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --role roles/aiplatform.user --condition None
     risk: high
+    undoes: [grant-vertex-user]
   - id: delete-service-account
     description: Delete the runtime service account {{service_account_name}}.
     command: gcloud iam service-accounts delete {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --project {{project_id}} --quiet
     risk: high
+    undoes: [create-service-account]
   - id: review-images
     description: >-
-      Built images remain in Artifact Registry repository 'cloud-run-source-deploy' in {{region}}.
-      Delete them in the console if nothing else uses them. APIs stay enabled; disabling them is
+      Built images remain in Artifact Registry repository 'cloud-run-source-deploy' in {{region}},
+      and the uploaded source archives remain in the Cloud Storage bucket
+      'run-sources-{{project_id}}-{{region}}'. Both are shared by every source deploy in that
+      region and keep costing a little storage; delete them in the console if nothing else uses them. APIs stay enabled; disabling them is
       optional and can break other workloads in the project.
     manual: true
