@@ -995,3 +995,66 @@ def test_teardown_tamper_message_and_changed_blueprint_warning(store):
                       expected=changed)
     assert out["teardown_warnings"] == ["teardown 'undo' differs from the current blueprint; running the "
                                         "recorded command"]
+
+
+def test_run_lookup_exact_prefix_and_ambiguous(store):
+    for rid in ("20260101T000000Z-a-1", "20260101T000000Z-a-12", "20260202T000000Z-b-3"):
+        store.save_run(_run_rec(run_id=rid))
+    assert store.get("20260101T000000Z-a-1")["run_id"] == "20260101T000000Z-a-1"   # exact beats prefix
+    assert store.get("20260202")["run_id"] == "20260202T000000Z-b-3"
+    assert store.get("latest")["run_id"] == "20260202T000000Z-b-3"
+    with pytest.raises(E.StateError, match=r"ambiguous \(2 runs match"):
+        store.get("20260101")
+    with pytest.raises(E.StateError, match="no run 'zzz'"):
+        store.get("zzz")
+
+
+def test_corrupt_state_mentions_backup_only_when_it_exists(tmp_path):
+    st = E.StateStore(tmp_path / "s" / "state.json")
+    st.path.parent.mkdir(parents=True)
+    st.path.write_text("{", encoding="utf-8")
+    with pytest.raises(E.StateError) as ei:
+        st.runs()
+    assert "previous copy" not in str(ei.value) and str(ei.value).endswith("move it aside to start fresh")
+    st.backup_path.write_text('{"runs": []}', encoding="utf-8")
+    with pytest.raises(E.StateError, match=r"a previous copy is at '.*state\.json\.bak'"):
+        st.runs()
+
+
+def _skip_bp():
+    data = minimal_data()
+    data["steps"][1]["skip_if"] = "firebase hosting:sites:get {{project_id}}"
+    data["steps"][1]["skip_if_expect"] = "{{project_id}}"
+    return make_bp(data)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("skip_argv", ["gcloud", "projects", "list"]),
+    ("verify_argv", ["gcloud", "projects", "list"]),
+    ("argv", ["firebase", "deploy", "other-project"]),
+])
+def test_resume_refuses_any_tampered_command_field(store, field, value):
+    runner = FakeRunner({("firebase", "deploy"): E.CommandResult(1, "", "boom"),
+                         ("firebase", "hosting:sites:get"): E.CommandResult(1, "", "not found")})
+    ex, plan, run = _apply_demo(store, runner, _skip_bp())
+    assert run["steps"][1]["status"] == "failed"
+    run["steps"][1][field] = value
+    ex.runner = FakeRunner()
+    with pytest.raises(E.StateError, match="no longer matches"):
+        ex.resume(run, plan, E.Gates(yes=True, approve_high_risk=True))
+    assert ex.runner.calls == []
+
+
+def test_resume_takes_expectations_from_the_blueprint_not_the_state_file(store):
+    runner = FakeRunner({("gcloud", "create"): E.CommandResult(1, "", "boom")})
+    ex, plan, run = _apply_demo(store, runner)
+    rec = run["steps"][0]
+    rec.update(verify_expect="", manual=True, public_exposure=True, timeout_seconds=1, risk="low")
+    # verify output does not contain the project id -> must fail despite the emptied expectation on disk
+    ex.runner = FakeRunner({("gcloud", "describe"): E.CommandResult(0, "something else", "")})
+    out = ex.resume(run, plan, E.Gates(yes=True, approve_high_risk=True))
+    one = out["steps"][0]
+    assert one["status"] == "verify_failed" and out["status"] == "failed"
+    assert one["verify_expect"] == plan.steps[0].verify_expect and one["manual"] is False
+    assert one["public_exposure"] is plan.steps[0].public_exposure
+    assert one["timeout_seconds"] == plan.steps[0].timeout_seconds and one["risk"] == plan.steps[0].risk

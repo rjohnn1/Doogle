@@ -812,7 +812,10 @@ class StateStore:
             raise StateError(f"no runs recorded in '{self.path}' (runs are recorded by 'doogle plan <id> --apply')")
         if run_id == "latest":
             return runs[-1]
-        matches = [r for r in runs if r["run_id"] == run_id or r["run_id"].startswith(run_id)]
+        exact = [r for r in runs if r["run_id"] == run_id]
+        if exact:
+            return exact[-1]
+        matches = [r for r in runs if r["run_id"].startswith(run_id)]
         if len(matches) == 1:
             return matches[0]
         if not matches:
