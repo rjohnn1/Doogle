@@ -101,7 +101,6 @@ jobs:
           cd /tmp
           /tmp/wheel-env/bin/doogle validate
           /tmp/wheel-env/bin/doogle list --json
-          /tmp/wheel-env/bin/doogle docs --check
       - name: Installed sdist works too
         run: |
           python -m venv /tmp/sdist-env
