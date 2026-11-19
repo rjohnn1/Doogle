@@ -27,6 +27,8 @@ jobs:
         run: pytest -v
       - name: Blueprint schema & integrity
         run: doogle validate
+      - name: Generated docs are up to date
+        run: doogle docs --check
       - name: CLI smoke checks (no cloud tools needed)
         run: |
           doogle --help
@@ -35,6 +37,8 @@ jobs:
           doogle plan solo-serverless-api --var project_id=ci-demo-project --json
           doogle ask "I want a cheap API for my side project" --json
           doogle doctor --json
+          doogle list --stale --json
+          doogle share solo-serverless-api --json
 
   package:
     runs-on: ubuntu-latest

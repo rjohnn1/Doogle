@@ -1,0 +1,33 @@
+- name: good first issue
+  color: "7057ff"
+  description: Small, well-scoped task for a first contribution
+- name: help wanted
+  color: "008672"
+  description: Maintainers would welcome a pull request
+- name: blueprint-request
+  color: "1d76db"
+  description: Proposal for a new blueprint
+- name: drift
+  color: "d93f0b"
+  description: Blueprint no longer matches current Google CLIs or products
+- name: bug
+  color: "d73a4a"
+  description: Doogle CLI or engine misbehaves
+- name: enhancement
+  color: "a2eeef"
+  description: New feature or improvement
+- name: safety
+  color: "b60205"
+  description: Touches safety gates, validation, injection or secrets
+- name: docs
+  color: "0075ca"
+  description: Documentation only
+- name: dependencies
+  color: "0366d6"
+  description: Dependency updates
+- name: needs-live-test
+  color: "fbca04"
+  description: Should be run on a throwaway project before merge
+- name: blueprint-of-the-week
+  color: "c5def5"
+  description: Featured in this week's community post

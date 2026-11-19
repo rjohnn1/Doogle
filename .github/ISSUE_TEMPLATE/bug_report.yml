@@ -1,0 +1,42 @@
+name: Bug report (CLI / engine)
+description: Doogle itself misbehaves (not a specific blueprint's command; use "Blueprint drift or bug" for that).
+title: "[bug] <short summary>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "**Do not paste secrets, tokens or private project IDs.** Security problems go to SECURITY.md, not here."
+  - type: input
+    id: version
+    attributes:
+      label: doogle --version
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS and Python version
+      placeholder: Ubuntu 24.04, Python 3.12.3
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands. Prefer commands that need no cloud access (list, explain, plan, ask, doctor).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behaviour
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed secrets, tokens and private identifiers.
+          required: true

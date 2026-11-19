@@ -19,6 +19,7 @@ from typing import Any, Optional, Sequence
 import yaml
 
 from . import __version__
+from . import docs as D
 from . import engine as E
 
 RISK_BADGE = {"low": "low", "medium": "MEDIUM", "high": "HIGH"}
@@ -105,6 +106,8 @@ def _print_plan(out: Out, plan: E.Plan) -> None:
     out.line("Variables:")
     for k, v in plan.variables.items():
         out.line(f"  {k} = {v}")
+    fresh = E.freshness(bp)
+    out.line(f"\nVerification: {_fresh_label(fresh)}")
     if bp.prerequisites:
         out.line("\nPrerequisites:")
         for p in bp.prerequisites:
@@ -119,6 +122,9 @@ def _print_plan(out: Out, plan: E.Plan) -> None:
         out.line(f"  {s.index}. [{', '.join(flags)}] {s.id}: {s.description}")
         if s.command:
             out.line(f"       $ {s.command}")
+        if s.skip_argv:
+            sk = f"   (expect: {s.skip_if_expect})" if s.skip_if_expect else ""
+            out.line(f"       skip if already done: {E.display(s.skip_argv)}{sk}")
         if s.verify_command:
             exp = f"   (expect output to contain: {s.verify_expect})" if s.verify_expect else ""
             out.line(f"       verify: {s.verify_command}{exp}")
@@ -141,7 +147,8 @@ def _print_run(out: Out, run: dict) -> None:
     for s in run["steps"]:
         extra = f" (exit {s['exit_code']})" if s.get("exit_code") not in (None, 0) else ""
         verify = f", verify {s['verify_status']}" if s.get("verify_status") not in (None, "not_defined") else ""
-        out.line(f"  {s['status']:<16} {s['id']}{extra}{verify}")
+        already = " (already done, skipped)" if s.get("skip_reason") else ""
+        out.line(f"  {s['status']:<16} {s['id']}{extra}{verify}{already}")
         if s["status"] in ("failed", "verify_failed") and s.get("output_tail"):
             for ln in s["output_tail"].splitlines()[-8:]:
                 out.line(f"      | {ln}")
@@ -181,21 +188,41 @@ def _gates(args, expected: str, out: Out) -> E.Gates:
 # --------------------------------------------------------------------------- commands
 
 
+def _fresh_label(f: dict) -> str:
+    age = "never" if f["age_days"] is None else f"{f['age_days']}d ago"
+    flag = "  STALE" if f["stale"] else ""
+    return f"{f['verification_status']}, {f['last_verified']} ({age}){flag}"
+
+
 def cmd_list(args, out: Out) -> int:
     cat = E.Catalog.load(args.blueprints_dir)
-    items = [{"id": b.id, "name": b.name, "category": b.category, "tagline": b.tagline,
-              "required_tools": b.required_tools()} for b in cat
-             if not args.category or b.category.lower() == args.category.lower()]
+    items = []
+    for b in cat:
+        if args.category and b.category.lower() != args.category.lower():
+            continue
+        fresh = E.freshness(b, stale_days=args.stale_days)
+        if args.stale and not fresh["stale"]:
+            continue
+        items.append({"id": b.id, "name": b.name, "category": b.category, "tagline": b.tagline,
+                      "required_tools": b.required_tools(), "maintainer": b.maintainer, "freshness": fresh})
+    stale = [i["id"] for i in items if i["freshness"]["stale"]]
     if out.as_json:
-        out.json({"blueprints_dir": str(cat.root), "source": cat.source, "blueprints": items,
-                  "invalid": cat.errors})
+        out.json({"blueprints_dir": str(cat.root), "source": cat.source, "stale_after_days": args.stale_days,
+                  "blueprints": items, "stale": stale, "invalid": cat.errors})
         return 0 if not cat.errors else 2
-    out.line(f"Blueprints ({cat.root}, from {cat.source}):\n")
+    title = f"Stale blueprints (last verified more than {args.stale_days} days ago)" if args.stale else "Blueprints"
+    out.line(f"{title} ({cat.root}, from {cat.source}):\n")
+    if not items:
+        out.line("  (none)")
     width = max([len(i["id"]) for i in items] + [10])
     for i in items:
         out.line(f"  {i['id']:<{width}}  [{i['category']}] {i['tagline']}")
+        out.line(f"  {'':<{width}}  verified: {_fresh_label(i['freshness'])}")
     for bp_id, errs in cat.errors.items():
         out.err(f"  INVALID {bp_id}: {'; '.join(errs)}")
+    if stale and not args.stale:
+        out.err(f"\nwarning: {len(stale)} blueprint(s) not verified in {args.stale_days} days: {', '.join(stale)}. "
+                "Commands may have drifted; check them against current docs before applying.")
     out.line("\nNext: doogle explain <id>   |   doogle ask \"<your goal>\"")
     return 0 if not cat.errors else 2
 
@@ -223,6 +250,14 @@ def cmd_explain(args, out: Out) -> int:
     for s in bp.services:
         out.line(f"  * {s['name']}: {s['role']}")
     out.line(f"\nCost: {bp.estimated_cost}")
+    fresh = E.freshness(bp)
+    out.line(f"\nFreshness: {_fresh_label(fresh)}; maintainer {bp.maintainer}")
+    out.line("  versions: " + ", ".join(f"{k} {v}" for k, v in sorted(bp.verified_versions.items())))
+    if bp.verification_notes:
+        out.line(f"  notes: {bp.verification_notes}")
+    if fresh["stale"]:
+        out.err(f"warning: '{bp.id}' was last verified {fresh['age_days']} days ago (> {fresh['stale_after_days']}); "
+                "CLI flags may have changed. Compare with the official docs before --apply.")
     if bp.prerequisites:
         out.line("\nPrerequisites:")
         for p in bp.prerequisites:
@@ -399,6 +434,47 @@ def cmd_doctor(args, out: Out) -> int:
     return 1 if report["status"] == "fail" else 0
 
 
+def cmd_docs(args, out: Out) -> int:
+    cat = E.Catalog.load(args.blueprints_dir)
+    if cat.errors:
+        raise E.BlueprintValidationError(", ".join(cat.errors), [e for es in cat.errors.values() for e in es])
+    root = Path(args.root).resolve()
+    try:
+        desired = D.generate(cat, root)
+    except ValueError as exc:
+        raise E.DoogleError(str(exc)) from exc
+    if args.check:
+        stale = D.stale_files(desired)
+        if out.as_json:
+            out.json({"up_to_date": not stale, "out_of_date": [str(p) for p in stale]})
+        elif stale:
+            out.err("generated docs are out of date: " + ", ".join(str(p.relative_to(root)) for p in stale)
+                    + "\nrun: doogle docs   (then commit the result)")
+        else:
+            out.line("docs are up to date")
+        return 1 if stale else 0
+    changed = D.write(desired)
+    if out.as_json:
+        out.json({"written": [str(p) for p in changed], "unchanged": [str(p) for p in desired if p not in changed]})
+    else:
+        for p in desired:
+            out.line(f"  {'updated ' if p in changed else 'unchanged'} {p.relative_to(root)}")
+    return 0
+
+
+def cmd_share(args, out: Out) -> int:
+    cat = E.Catalog.load(args.blueprints_dir)
+    bp = cat.get(args.blueprint)
+    snippet = D.share_snippet(bp, D.repo_url(args.repo_url))
+    if out.as_json:
+        out.json(snippet)
+        return 0
+    out.line(snippet["markdown"])
+    if snippet["placeholder_repo"]:
+        out.err(f"note: links use the placeholder {D.PLACEHOLDER_REPO}; pass --repo-url or set ${D.REPO_URL_ENV}.")
+    return 0
+
+
 def cmd_validate(args, out: Out) -> int:
     root, source = E.resolve_blueprints_dir(args.blueprints_dir)
     cat = E.Catalog(root, source)
@@ -447,8 +523,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", metavar="<command>")
     sub.required = True
 
-    s = sub.add_parser("list", parents=[common], help="list available blueprints")
+    s = sub.add_parser("list", parents=[common], help="list available blueprints and their freshness")
     s.add_argument("--category", help="filter by category")
+    s.add_argument("--stale", action="store_true", help="only blueprints not verified recently")
+    s.add_argument("--stale-days", type=int, default=E.STALE_AFTER_DAYS, metavar="N",
+                   help=f"age in days after which a blueprint counts as stale (default {E.STALE_AFTER_DAYS})")
     s.set_defaults(func=cmd_list)
 
     s = sub.add_parser("explain", parents=[common], help="trade-offs, services, cost, and steps of a blueprint")
@@ -487,6 +566,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("doctor", parents=[common], help="read-only environment diagnostics")
     s.set_defaults(func=cmd_doctor)
+
+    s = sub.add_parser("docs", parents=[common],
+                       help="regenerate docs/DECISION_MATRIX.md and the README gallery from blueprints")
+    s.add_argument("--check", action="store_true", help="exit 1 if generated docs are out of date (CI)")
+    s.add_argument("--root", default=".", help="repository root (default: current directory)")
+    s.set_defaults(func=cmd_docs)
+
+    s = sub.add_parser("share", parents=[common], help="print a markdown badge + blurb for a blueprint")
+    s.add_argument("blueprint")
+    s.add_argument("--repo-url", help=f"repository URL for links (default: ${D.REPO_URL_ENV} or a placeholder)")
+    s.set_defaults(func=cmd_share)
 
     s = sub.add_parser("validate", parents=[common], help="strictly validate every blueprint (used by CI)")
     s.set_defaults(func=cmd_validate)

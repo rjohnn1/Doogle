@@ -1,0 +1,74 @@
+name: Blueprint drift or bug
+description: A blueprint command, flag, verify check or guide step is outdated or broken.
+title: "[drift] <blueprint-id>: <short summary>"
+labels: ["drift", "bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting drift; it is the most useful issue you can file.
+        **Never paste secrets, API keys, access tokens, service-account JSON, or private project IDs.**
+        Replace them with placeholders such as `YOUR_PROJECT_ID`.
+  - type: dropdown
+    id: blueprint
+    attributes:
+      label: Blueprint
+      options:
+        - ai-studio-to-vertex
+        - firebase-auth-mvp
+        - gemini-adk-service
+        - solo-serverless-api
+        - workspace-sheet-webhook
+        - other / not listed
+    validations:
+      required: true
+  - type: input
+    id: step
+    attributes:
+      label: Step or teardown id
+      placeholder: deploy-service
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem?
+      options:
+        - A flag or subcommand was renamed or removed
+        - Command fails on a fresh project (permissions, prerequisites)
+        - verify_command passes or fails incorrectly
+        - Teardown leaves resources behind
+        - Cost note or when_not_to_use is wrong or outdated
+        - GUIDE.md is wrong or unclear
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Tool versions
+      description: Output of `doogle --version` and the relevant CLI, e.g. `gcloud --version | head -1`, `firebase --version`, `clasp --version`.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The exact command (from `doogle plan`) and the error. `doogle history latest --json` output is helpful; redact project IDs and emails.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: fix
+    attributes:
+      label: Suggested fix and source
+      description: The corrected command or flag, with a link to the official documentation or release notes that confirm it.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed secrets, tokens and private identifiers from this report.
+          required: true
+        - label: I would like to open the pull request myself.

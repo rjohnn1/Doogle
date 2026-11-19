@@ -1,0 +1,155 @@
+schema_version: 2
+id: firebase-auth-mvp
+name: Firebase Auth MVP (Hosting + Authentication + Firestore)
+category: web
+tagline: Launch a small web MVP with sign-in, a Firestore database locked down by security rules, and global static hosting on a free web.app domain.
+maintainer: "@OWNER"  # TODO(maintainer): replace with your GitHub handle before publishing
+last_verified: "2026-11-19"
+verification_status: syntax-checked
+verified_versions:
+  gcloud: "594.0.0"
+  firebase-tools: "15.37.0"
+  python: "3.13.5"
+verification_notes: >-
+  Every subcommand and flag was checked against the installed gcloud 594.0.0 and firebase-tools 15.37.0 --help output with scripts/check_cli_syntax.py, and the full plan/apply/verify/teardown flow was run against stub CLIs in the test suite. It has NOT yet been run against a live Google Cloud project; expect first-run issues such as missing permissions or IAM propagation delays, and please report them with the drift issue template.
+keywords:
+  - firebase
+  - mvp
+  - login
+  - sign in
+  - sign-in
+  - signup
+  - sign up
+  - authentication
+  - auth
+  - users
+  - firestore
+  - database
+  - web app
+  - webapp
+  - website
+  - frontend
+  - hosting
+  - spa
+  - react
+  - startup
+  - saas
+when_to_use:
+  - You are building a small web app (plain JS, React, Vue, Svelte...) that needs user sign-in and a database, and you want no servers to run.
+  - An MVP or hackathon project where the free tier is likely enough and you want a real HTTPS URL today.
+  - Per-user data that Firestore security rules can protect (each user reads and writes only their own documents).
+when_not_to_use:
+  - "A static site with no users or data: Firebase Hosting alone (skip Auth and Firestore) is simpler."
+  - "Heavy relational data, joins, or reporting: Cloud SQL (PostgreSQL) behind a Cloud Run API fits better than Firestore."
+  - "Server-side rendering or a full-stack framework (Next.js, Angular SSR): use Firebase App Hosting instead of classic Hosting."
+  - "Enterprise SSO, SAML, multi-tenancy or SLAs on sign-in: upgrade to Identity Platform and plan for its pricing."
+  - "You need secret server logic (payments, admin actions): add Cloud Functions or a Cloud Run API; never trust the browser."
+services:
+  - name: Firebase Hosting
+    role: Serves your built web files from a global CDN at PROJECT_ID.web.app over HTTPS.
+  - name: Firebase Authentication
+    role: Handles sign-up and sign-in (email/password, Google and more) and issues ID tokens.
+  - name: Cloud Firestore
+    role: Serverless NoSQL database the browser talks to directly, guarded by security rules.
+  - name: Firebase web app registration
+    role: Gives you the public web config (apiKey, authDomain, projectId...) your front end needs.
+estimated_cost: >-
+  Hosting, Authentication and Firestore all have no-cost quotas on the Spark plan that usually
+  cover an MVP; usage beyond them (storage, transfer, document reads and writes, some sign-in
+  methods such as phone/SMS) needs the pay-as-you-go Blaze plan. Check the official Firebase
+  pricing page and set a budget alert before launch.
+prerequisites:
+  - "gcloud and firebase-tools installed and logged in (gcloud auth login, firebase login)."
+  - A Google Cloud project you own. Doogle adds Firebase to it if it is not a Firebase project yet.
+  - "Run doogle from an empty project folder: the manual step creates firebase.json, firestore.rules and public/ there (copy them from GUIDE.md)."
+docs:
+  - https://firebase.google.com/docs/hosting/quickstart
+  - https://firebase.google.com/docs/auth/web/start
+  - https://firebase.google.com/docs/firestore/quickstart
+  - https://firebase.google.com/docs/firestore/security/get-started
+  - https://firebase.google.com/pricing
+variables:
+  - key: project_id
+    prompt: Google Cloud / Firebase project ID
+    pattern: "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+    example: my-mvp-123
+  - key: firestore_location
+    prompt: Firestore location (permanent; e.g. nam5, eur3, us-central1, asia-south1)
+    default: nam5
+    pattern: "^(nam5|eur3|[a-z]+-[a-z]+[0-9]+)$"
+  - key: app_display_name
+    prompt: Display name for the Firebase web app registration
+    default: doogle-mvp-web
+    pattern: "^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$"
+steps:
+  - id: show-firebase-account
+    description: Show which Google account firebase-tools is logged in as (read-only). Stop if it is the wrong one.
+    command: firebase login:list
+    risk: low
+  - id: check-project
+    description: Confirm the project exists and your gcloud account can see it (read-only).
+    command: gcloud projects describe {{project_id}} '--format=value(projectId)'
+    risk: low
+  - id: add-firebase
+    description: Add Firebase to {{project_id}} (skipped if it is already a Firebase project).
+    command: firebase projects:addfirebase {{project_id}}
+    risk: medium
+    skip_if: firebase projects:list --json
+    skip_if_expect: '"projectId": "{{project_id}}"'
+    verify_command: firebase projects:list --json
+    verify_expect: '"projectId": "{{project_id}}"'
+  - id: enable-apis
+    description: Enable the Firestore, Identity Toolkit (Authentication) and Firebase Hosting APIs.
+    command: gcloud services enable firestore.googleapis.com identitytoolkit.googleapis.com firebasehosting.googleapis.com --project {{project_id}}
+    risk: medium
+    verify_command: gcloud services list --enabled --project {{project_id}} '--filter=config.name=firestore.googleapis.com' '--format=value(config.name)'
+    verify_expect: firestore.googleapis.com
+  - id: create-firestore
+    description: Create the (default) Firestore database in {{firestore_location}} (skipped if it exists). The location cannot be changed later.
+    command: gcloud firestore databases create --location={{firestore_location}} --project {{project_id}}
+    risk: medium
+    skip_if: gcloud firestore databases describe '--database=(default)' --project {{project_id}} '--format=value(name)'
+    skip_if_expect: "databases/(default)"
+    verify_command: gcloud firestore databases describe '--database=(default)' --project {{project_id}} '--format=value(locationId)'
+    verify_expect: "{{firestore_location}}"
+  - id: register-web-app
+    description: Register a Firebase web app named {{app_display_name}} (skipped if one with that name exists).
+    command: firebase apps:create WEB {{app_display_name}} --project {{project_id}}
+    risk: low
+    skip_if: firebase apps:list WEB --project {{project_id}}
+    skip_if_expect: "{{app_display_name}}"
+    verify_command: firebase apps:list WEB --project {{project_id}}
+    verify_expect: "{{app_display_name}}"
+  - id: enable-sign-in-providers
+    description: >-
+      In the Firebase console (Build > Authentication > Get started > Sign-in method) enable
+      Email/Password and/or Google for {{project_id}}. firebase-tools has no command for this.
+    manual: true
+  - id: add-app-files
+    description: >-
+      Create firebase.json, firestore.rules and public/index.html from GUIDE.md in this folder, and
+      paste the web config printed by 'firebase apps:sdkconfig WEB --project {{project_id}}' into
+      public/index.html.
+    manual: true
+  - id: deploy
+    description: Deploy the site and the Firestore security rules. The site becomes public at https://{{project_id}}.web.app
+    command: firebase deploy --only hosting,firestore:rules --project {{project_id}} --non-interactive
+    risk: high
+    public_exposure: true
+    verify_command: curl -fsS --max-time 30 https://{{project_id}}.web.app/
+    verify_expect: "<html"
+teardown:
+  - id: disable-hosting
+    description: Stop serving the site at {{project_id}}.web.app (Firebase Hosting keeps old releases until you delete the site).
+    command: firebase hosting:disable --project {{project_id}} --force
+    risk: high
+  - id: delete-firestore
+    description: Permanently delete the (default) Firestore database and ALL its data. Export first if you need it.
+    command: gcloud firestore databases delete '--database=(default)' --project {{project_id}} --quiet
+    risk: high
+  - id: remove-auth-and-app
+    description: >-
+      In the Firebase console, disable the sign-in providers, delete test users (Authentication >
+      Users) and remove the web app (Project settings > Your apps). If you created the project only
+      for this test, shut it down yourself in the Cloud console; Doogle never deletes projects.
+    manual: true

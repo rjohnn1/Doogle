@@ -1,0 +1,54 @@
+# Copy this folder to blueprints/<your-id>/, then replace every TODO.
+# `doogle validate` tells you exactly what is still wrong. Folders starting
+# with "_" are ignored by the catalog, so this template never ships as a blueprint.
+schema_version: 2
+id: my-blueprint                     # TODO: must equal the folder name (kebab-case)
+name: TODO Human-readable name
+category: compute                    # TODO: compute | web | ai | workspace | data | ...
+tagline: TODO One line describing the value, e.g. "Run a nightly job on Cloud Scheduler + Cloud Run jobs."
+maintainer: "@your-github-handle"    # TODO
+last_verified: "2026-01-01"          # TODO: date you last checked the commands (YYYY-MM-DD)
+verification_status: simulated       # simulated | syntax-checked | live (see GOVERNANCE.md)
+verified_versions:
+  gcloud: "unverified"               # TODO: e.g. "594.0.0" once checked; quote versions
+verification_notes: >-
+  TODO Say honestly how this was checked (stub CLIs, --help check, or a real throwaway project).
+keywords:                            # words people use when they want this (used by `doogle ask`)
+  - todo
+when_to_use:
+  - TODO A concrete situation where this stack is a strong fit.
+when_not_to_use:
+  - "TODO A simpler or cheaper Google alternative to consider first, and when."
+services:
+  - name: TODO Google service
+    role: TODO What it does in this stack.
+estimated_cost: >-
+  TODO Plain language only: free tier vs usage-based, what drives cost, and "check the official
+  pricing page". No exact prices.
+docs:
+  - https://cloud.google.com/docs     # TODO: official docs for every command you use
+variables:
+  - key: project_id
+    prompt: Google Cloud project ID
+    pattern: "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+    example: my-project-123
+  - key: region
+    prompt: Region
+    default: us-central1
+    pattern: "^[a-z]+-[a-z]+[0-9]+$"
+steps:
+  - id: check-project
+    description: Confirm the project exists and your gcloud account can see it (read-only).
+    command: gcloud projects describe {{project_id}} '--format=value(projectId)'
+    risk: low
+  - id: enable-apis
+    description: TODO Enable the APIs this stack needs.
+    command: gcloud services enable run.googleapis.com --project {{project_id}}
+    risk: medium
+    verify_command: gcloud services list --enabled --project {{project_id}} '--filter=config.name=run.googleapis.com' '--format=value(config.name)'
+    verify_expect: run.googleapis.com
+teardown:
+  - id: todo-cleanup
+    description: TODO Remove what the steps created. Deletes must be risk high.
+    command: gcloud run services delete TODO-service --region {{region}} --project {{project_id}} --quiet
+    risk: high

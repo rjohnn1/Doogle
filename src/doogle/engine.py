@@ -25,14 +25,38 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from importlib import resources
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 import yaml
 
-SCHEMA_VERSION = 1
+from .validator import (  # noqa: F401  (re-exported for backwards compatibility)
+    DESTRUCTIVE_TOKENS,
+    FORBIDDEN_BINARIES,
+    ID_RE,
+    NEVER_AUTOMATE,
+    PLACEHOLDER_RE,
+    PRICE_RE,
+    RISK_LEVELS,
+    SCHEMA_VERSION,
+    SECRET_KEY_RE,
+    SHELL_OPERATORS,
+    STALE_AFTER_DAYS,
+    UNVERIFIED,
+    VERIFICATION_STATUSES,
+    STEP_FIELDS,
+    TEARDOWN_FIELDS,
+    TOP_LEVEL_OPTIONAL,
+    TOP_LEVEL_REQUIRED,
+    VAR_KEY_RE,
+    VARIABLE_FIELDS,
+    _tokens,
+    parse_date,
+    validate_blueprint_data,
+)
+
 STATE_VERSION = 1
 BLUEPRINTS_ENV = "DOOGLE_BLUEPRINTS_DIR"
 STATE_DIR_ENV = "DOOGLE_STATE_DIR"
@@ -40,34 +64,12 @@ GEMINI_MODEL_ENV = "DOOGLE_GEMINI_MODEL"
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 AI_KEY_ENVS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 
-RISK_LEVELS = ("low", "medium", "high")
-ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-VAR_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]*?)\s*\}\}")
-SECRET_KEY_RE = re.compile(r"(secret|password|passwd|token|api_?key|private_?key|credential)", re.I)
-PRICE_RE = re.compile(r"[$€£₹¥]\s?\d|\d+(?:\.\d+)?\s?(?:usd|eur|inr|dollars?)\b", re.I)
-SHELL_OPERATORS = {"|", "||", "&", "&&", ";", ";;", ">", ">>", "<", "<<", "(", ")"}
-FORBIDDEN_BINARIES = {"sudo", "su", "doas", "rm", "dd", "mkfs", "shutdown", "reboot",
-                      "eval", "exec", "sh", "bash", "zsh", "fish", "pwsh", "powershell", "cmd"}
-DESTRUCTIVE_TOKENS = {"delete", "remove-iam-policy-binding", "delete-deployment", "delete-script",
-                      "undeploy", "destroy", "purge"}
-NEVER_AUTOMATE = [("gcloud", "projects", "delete"), ("gcloud", "organizations"),
-                  ("gcloud", "billing", "accounts")]
-
-TOP_LEVEL_REQUIRED = ("schema_version", "id", "name", "category", "tagline", "when_to_use",
-                      "when_not_to_use", "services", "estimated_cost", "variables", "steps",
-                      "teardown")
-TOP_LEVEL_OPTIONAL = ("keywords", "requires_tools", "docs", "prerequisites")
-STEP_FIELDS = {"id", "description", "command", "risk", "public_exposure", "verify_command",
-               "verify_expect", "manual", "timeout_seconds"}
-TEARDOWN_FIELDS = {"id", "description", "command", "risk", "manual"}
-VARIABLE_FIELDS = {"key", "prompt", "default", "pattern", "example"}
-
 TOOL_HINTS = {
     "gcloud": "Install the Google Cloud CLI: https://cloud.google.com/sdk/docs/install",
-    "firebase": "Install the Firebase CLI: npm install -g firebase-tools",
+    "firebase": "Install the Firebase CLI: npm install -g firebase-tools  (then run: firebase login)",
     "clasp": "Install clasp: npm install -g @google/clasp  (then run: clasp login)",
     "adk": "Install Google ADK: pip install google-adk",
+    "curl": "Install curl (preinstalled on most Linux/macOS systems)",
     "test": "POSIX 'test' utility (present on Linux/macOS; use WSL or Git Bash on Windows)",
 }
 
@@ -113,12 +115,6 @@ class StateError(DoogleError):
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-def _tokens(command: str) -> list[str]:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    return list(lexer)
 
 
 # --------------------------------------------------------------------------- blueprint resolution
@@ -196,6 +192,8 @@ class Step:
     verify_expect: Optional[str] = None
     manual: bool = False
     timeout_seconds: int = 1800
+    skip_if: Optional[str] = None
+    skip_if_expect: Optional[str] = None
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -226,6 +224,11 @@ class Blueprint:
     variables: list[Variable]
     steps: list[Step]
     teardown: list[TeardownStep]
+    maintainer: str = ""
+    last_verified: str = ""
+    verification_status: str = "simulated"
+    verified_versions: dict = field(default_factory=dict)
+    verification_notes: str = ""
     keywords: list[str] = field(default_factory=list)
     requires_tools: list[str] = field(default_factory=list)
     prerequisites: list[str] = field(default_factory=list)
@@ -242,6 +245,7 @@ class Blueprint:
     def required_tools(self) -> list[str]:
         tools = set(self.requires_tools)
         commands = [s.command for s in self.steps] + [s.verify_command for s in self.steps]
+        commands += [s.skip_if for s in self.steps]
         commands += [t.command for t in self.teardown]
         for cmd in commands:
             if cmd:
@@ -257,6 +261,8 @@ class Blueprint:
             "name": self.name,
             "category": self.category,
             "tagline": self.tagline,
+            "maintainer": self.maintainer,
+            "freshness": freshness(self),
             "keywords": self.keywords,
             "when_to_use": self.when_to_use,
             "when_not_to_use": self.when_not_to_use,
@@ -273,253 +279,20 @@ class Blueprint:
         }
 
 
-# --------------------------------------------------------------------------- validation
-
-
-def _nonempty_str(value: Any) -> bool:
-    return isinstance(value, str) and value.strip() != ""
-
-
-def _str_list(value: Any) -> bool:
-    return isinstance(value, list) and len(value) > 0 and all(_nonempty_str(v) for v in value)
-
-
-def _validate_command(where: str, command: Any, declared: set[str], errors: list[str]) -> Optional[list[str]]:
-    if not _nonempty_str(command):
-        errors.append(f"{where}: command must be a non-empty string")
-        return None
-    if "\n" in command:
-        errors.append(f"{where}: command must be a single line")
-    if "$(" in command or "`" in command or "${" in command:
-        errors.append(f"{where}: command substitution / shell expansion is not allowed")
-    try:
-        toks = _tokens(command)
-    except ValueError as exc:
-        errors.append(f"{where}: command cannot be tokenised ({exc})")
-        return None
-    if not toks:
-        errors.append(f"{where}: command is empty")
-        return None
-    ops = [t for t in toks if t in SHELL_OPERATORS or set(t) <= set("|&;<>()")]
-    if ops:
-        errors.append(f"{where}: shell operators {sorted(set(ops))} are not allowed; split into separate steps")
-    binary = toks[0]
-    if "/" in binary or "\\" in binary:
-        errors.append(f"{where}: first token must be a bare tool name, not a path ('{binary}')")
-    if binary in FORBIDDEN_BINARIES:
-        errors.append(f"{where}: '{binary}' is not an allowed tool in blueprints")
-    if PLACEHOLDER_RE.search(binary):
-        errors.append(f"{where}: the tool name cannot be a variable")
-    for match in PLACEHOLDER_RE.finditer(command):
-        name = match.group(1)
-        if not VAR_KEY_RE.match(name):
-            errors.append(f"{where}: malformed placeholder '{{{{{name}}}}}'")
-        elif name not in declared:
-            errors.append(f"{where}: placeholder '{{{{{name}}}}}' is not a declared variable")
-    stripped = PLACEHOLDER_RE.sub("", command)
-    if "{{" in stripped or "}}" in stripped:
-        errors.append(f"{where}: unbalanced '{{{{' / '}}}}' in command")
-    lowered = [t.lower() for t in toks]
-    for pattern in NEVER_AUTOMATE:
-        n = len(pattern)
-        if any(tuple(lowered[i:i + n]) == pattern for i in range(len(lowered) - n + 1)):
-            errors.append(f"{where}: '{' '.join(pattern)}' must never be automated by a blueprint")
-    return toks
-
-
-def _is_destructive(tokens: Iterable[str]) -> bool:
-    return any(t.lower() in DESTRUCTIVE_TOKENS for t in tokens)
-
-
-def validate_blueprint_data(data: Any, folder_name: Optional[str] = None) -> list[str]:
-    """Strict schema check (spec section 5). Returns a list of error strings."""
-    errors: list[str] = []
-    if not isinstance(data, dict):
-        return ["blueprint.yaml must contain a mapping at the top level"]
-
-    for key in TOP_LEVEL_REQUIRED:
-        if key not in data:
-            errors.append(f"missing required field '{key}'")
-    unknown = set(data) - set(TOP_LEVEL_REQUIRED) - set(TOP_LEVEL_OPTIONAL)
-    if unknown:
-        errors.append(f"unknown top-level field(s): {sorted(unknown)}")
-
-    if data.get("schema_version") not in (None, SCHEMA_VERSION) and "schema_version" in data:
-        errors.append(f"schema_version must be {SCHEMA_VERSION}")
-
-    bp_id = data.get("id")
-    if "id" in data:
-        if not isinstance(bp_id, str) or not ID_RE.match(bp_id):
-            errors.append("id must be lowercase kebab-case (e.g. 'solo-serverless-api')")
-        elif folder_name is not None and bp_id != folder_name:
-            errors.append(f"id '{bp_id}' must match its folder name '{folder_name}'")
-
-    for key in ("name", "category", "tagline", "estimated_cost"):
-        if key in data and not _nonempty_str(data[key]):
-            errors.append(f"'{key}' must be a non-empty string")
-    if _nonempty_str(data.get("estimated_cost")) and PRICE_RE.search(data["estimated_cost"]):
-        errors.append("estimated_cost must be a plain-language note; do not state exact prices "
-                      "(link to the official pricing page instead)")
-
-    for key in ("when_to_use", "when_not_to_use"):
-        if key in data and not _str_list(data[key]):
-            errors.append(f"'{key}' must be a non-empty list of non-empty strings")
-    for key in ("keywords", "requires_tools", "prerequisites", "docs"):
-        if key in data and not (isinstance(data[key], list) and all(_nonempty_str(v) for v in data[key])):
-            errors.append(f"'{key}' must be a list of non-empty strings")
-    for tool in data.get("requires_tools") or []:
-        if isinstance(tool, str) and tool in FORBIDDEN_BINARIES:
-            errors.append(f"requires_tools: '{tool}' is not an allowed tool")
-
-    services = data.get("services")
-    if "services" in data:
-        if not isinstance(services, list) or not services:
-            errors.append("'services' must be a non-empty list")
-        else:
-            for i, svc in enumerate(services):
-                if not isinstance(svc, dict) or not _nonempty_str(svc.get("name")) or not _nonempty_str(svc.get("role")):
-                    errors.append(f"services[{i}] must have non-empty 'name' and 'role'")
-                elif set(svc) - {"name", "role", "docs"}:
-                    errors.append(f"services[{i}] has unknown field(s): {sorted(set(svc) - {'name', 'role', 'docs'})}")
-
-    declared: set[str] = set()
-    variables = data.get("variables")
-    if "variables" in data:
-        if not isinstance(variables, list):
-            errors.append("'variables' must be a list (may be empty)")
-            variables = []
-        for i, var in enumerate(variables):
-            where = f"variables[{i}]"
-            if not isinstance(var, dict):
-                errors.append(f"{where} must be a mapping")
-                continue
-            extra = set(var) - VARIABLE_FIELDS
-            if extra:
-                errors.append(f"{where} has unknown field(s): {sorted(extra)}")
-            key = var.get("key")
-            if not isinstance(key, str) or not VAR_KEY_RE.match(key):
-                errors.append(f"{where}: key must be snake_case (e.g. 'project_id')")
-                continue
-            if key in declared:
-                errors.append(f"{where}: duplicate variable key '{key}'")
-            declared.add(key)
-            if SECRET_KEY_RE.search(key):
-                errors.append(f"{where}: '{key}' looks like a secret; blueprints must not take secrets "
-                              "as variables (use Secret Manager or the tool's own login flow)")
-            if not _nonempty_str(var.get("prompt")):
-                errors.append(f"{where}: prompt must be a non-empty string")
-            if "default" in var and var["default"] is not None and not isinstance(var["default"], (str, int)):
-                errors.append(f"{where}: default must be a string")
-            pattern = var.get("pattern")
-            if pattern is not None:
-                try:
-                    compiled = re.compile(pattern)
-                except (re.error, TypeError) as exc:
-                    errors.append(f"{where}: invalid pattern ({exc})")
-                else:
-                    default = var.get("default")
-                    if default is not None and not compiled.fullmatch(str(default)):
-                        errors.append(f"{where}: default '{default}' does not match its pattern")
-
-    steps = data.get("steps")
-    step_ids: set[str] = set()
-    if "steps" in data:
-        if not isinstance(steps, list) or not steps:
-            errors.append("'steps' must be a non-empty list")
-            steps = []
-        if steps and all(isinstance(s, dict) and s.get("manual") for s in steps):
-            errors.append("'steps' must contain at least one automated (non-manual) step")
-        for i, step in enumerate(steps):
-            where = f"steps[{i}]"
-            if not isinstance(step, dict):
-                errors.append(f"{where} must be a mapping")
-                continue
-            sid = step.get("id")
-            if isinstance(sid, str):
-                where = f"steps[{i}] '{sid}'"
-            extra = set(step) - STEP_FIELDS
-            if extra:
-                errors.append(f"{where} has unknown field(s): {sorted(extra)}")
-            if not isinstance(sid, str) or not ID_RE.match(sid):
-                errors.append(f"{where}: id must be lowercase kebab-case")
-            elif sid in step_ids:
-                errors.append(f"{where}: duplicate step id")
-            else:
-                step_ids.add(sid)
-            if not _nonempty_str(step.get("description")):
-                errors.append(f"{where}: description must be a non-empty string")
-            risk = step.get("risk", "low")
-            if risk not in RISK_LEVELS:
-                errors.append(f"{where}: risk must be one of {list(RISK_LEVELS)}")
-            if "public_exposure" in step and not isinstance(step["public_exposure"], bool):
-                errors.append(f"{where}: public_exposure must be true/false")
-            if "manual" in step and not isinstance(step["manual"], bool):
-                errors.append(f"{where}: manual must be true/false")
-            if "timeout_seconds" in step and (not isinstance(step["timeout_seconds"], int)
-                                              or step["timeout_seconds"] <= 0):
-                errors.append(f"{where}: timeout_seconds must be a positive integer")
-            if step.get("manual"):
-                for f_ in ("command", "verify_command", "verify_expect"):
-                    if f_ in step:
-                        errors.append(f"{where}: manual steps must not define '{f_}'")
-                continue
-            toks = _validate_command(where, step.get("command"), declared, errors)
-            if toks and _is_destructive(toks) and risk != "high":
-                errors.append(f"{where}: destructive command must be marked risk: high")
-            if "verify_command" in step:
-                vtoks = _validate_command(f"{where} verify_command", step["verify_command"], declared, errors)
-                if vtoks and _is_destructive(vtoks):
-                    errors.append(f"{where}: verify_command must be read-only")
-            if "verify_expect" in step:
-                if not _nonempty_str(step["verify_expect"]):
-                    errors.append(f"{where}: verify_expect must be a non-empty string")
-                elif "verify_command" not in step:
-                    errors.append(f"{where}: verify_expect requires verify_command")
-                else:
-                    for m in PLACEHOLDER_RE.finditer(step["verify_expect"]):
-                        if m.group(1) not in declared:
-                            errors.append(f"{where}: verify_expect placeholder '{m.group(1)}' is not declared")
-
-    teardown = data.get("teardown")
-    if "teardown" in data:
-        if not isinstance(teardown, list) or not teardown:
-            errors.append("'teardown' must be a non-empty list")
-            teardown = []
-        td_ids: set[str] = set()
-        has_command = False
-        for i, td in enumerate(teardown):
-            where = f"teardown[{i}]"
-            if not isinstance(td, dict):
-                errors.append(f"{where} must be a mapping")
-                continue
-            tid = td.get("id")
-            if isinstance(tid, str):
-                where = f"teardown[{i}] '{tid}'"
-            extra = set(td) - TEARDOWN_FIELDS
-            if extra:
-                errors.append(f"{where} has unknown field(s): {sorted(extra)}")
-            if not isinstance(tid, str) or not ID_RE.match(tid):
-                errors.append(f"{where}: id must be lowercase kebab-case")
-            elif tid in td_ids:
-                errors.append(f"{where}: duplicate teardown id")
-            else:
-                td_ids.add(tid)
-            if not _nonempty_str(td.get("description")):
-                errors.append(f"{where}: description must be a non-empty string")
-            risk = td.get("risk", "high")
-            if risk not in RISK_LEVELS:
-                errors.append(f"{where}: risk must be one of {list(RISK_LEVELS)}")
-            if td.get("manual"):
-                if "command" in td:
-                    errors.append(f"{where}: manual teardown entries must not define 'command'")
-                continue
-            has_command = True
-            toks = _validate_command(where, td.get("command"), declared, errors)
-            if toks and _is_destructive(toks) and risk != "high":
-                errors.append(f"{where}: destructive command must be marked risk: high")
-        if teardown and not has_command:
-            errors.append("'teardown' must include at least one command")
-    return errors
+def freshness(bp: "Blueprint", today: Optional[date] = None, stale_days: int = STALE_AFTER_DAYS) -> dict:
+    """How recently a blueprint's commands were checked, and how."""
+    today = today or date.today()
+    verified = parse_date(bp.last_verified)
+    age = (today - verified).days if verified else None
+    return {
+        "last_verified": bp.last_verified,
+        "age_days": age,
+        "stale": age is None or age > stale_days,
+        "stale_after_days": stale_days,
+        "verification_status": bp.verification_status,
+        "verified_versions": dict(bp.verified_versions),
+        "notes": bp.verification_notes,
+    }
 
 
 def blueprint_from_data(data: dict, path: Optional[Path] = None) -> Blueprint:
@@ -539,11 +312,17 @@ def blueprint_from_data(data: dict, path: Optional[Path] = None) -> Blueprint:
         steps=[Step(id=s["id"], description=s["description"].strip(), command=s.get("command"),
                     risk=s.get("risk", "low"), public_exposure=bool(s.get("public_exposure", False)),
                     verify_command=s.get("verify_command"), verify_expect=s.get("verify_expect"),
-                    manual=bool(s.get("manual", False)), timeout_seconds=int(s.get("timeout_seconds", 1800)))
+                    manual=bool(s.get("manual", False)), timeout_seconds=int(s.get("timeout_seconds", 1800)),
+                    skip_if=s.get("skip_if"), skip_if_expect=s.get("skip_if_expect"))
                for s in data["steps"]],
         teardown=[TeardownStep(id=t["id"], description=t["description"].strip(), command=t.get("command"),
                                risk=t.get("risk", "high"), manual=bool(t.get("manual", False)))
                   for t in data["teardown"]],
+        maintainer=str(data["maintainer"]).strip(),
+        last_verified=parse_date(data["last_verified"]).isoformat(),
+        verification_status=data["verification_status"],
+        verified_versions={str(k): str(v) for k, v in data["verified_versions"].items()},
+        verification_notes=str(data.get("verification_notes") or "").strip(),
         keywords=list(data.get("keywords") or []),
         requires_tools=list(data.get("requires_tools") or []),
         prerequisites=list(data.get("prerequisites") or []),
@@ -562,8 +341,11 @@ def load_blueprint_file(folder: Path) -> Blueprint:
     except yaml.YAMLError as exc:
         raise BlueprintValidationError(folder.name, [f"YAML parse error: {exc}"]) from exc
     errors = validate_blueprint_data(data, folder.name)
-    if not (folder / "GUIDE.md").is_file():
+    guide = folder / "GUIDE.md"
+    if not guide.is_file():
         errors.append("missing GUIDE.md next to blueprint.yaml")
+    elif re.search(r"\bTODO\b", guide.read_text(encoding="utf-8")):
+        errors.append("GUIDE.md still contains TODO placeholders")
     if errors:
         raise BlueprintValidationError(folder.name, errors)
     return blueprint_from_data(data, folder)
@@ -697,6 +479,8 @@ class PlannedStep:
     verify_argv: Optional[list[str]]
     verify_expect: Optional[str]
     timeout_seconds: int = 1800
+    skip_argv: Optional[list[str]] = None
+    skip_if_expect: Optional[str] = None
 
     @property
     def command(self) -> Optional[str]:
@@ -712,6 +496,8 @@ class PlannedStep:
             "public_exposure": self.public_exposure, "manual": self.manual, "command": self.command,
             "argv": self.argv, "verify_command": self.verify_command, "verify_argv": self.verify_argv,
             "verify_expect": self.verify_expect,
+            "skip_if": display(self.skip_argv) if self.skip_argv else None,
+            "skip_argv": self.skip_argv, "skip_if_expect": self.skip_if_expect,
         }
 
 
@@ -810,6 +596,8 @@ def build_plan(bp: Blueprint, provided: Optional[Mapping[str, Any]] = None,
             verify_argv=render_argv(s.verify_command, values) if s.verify_command else None,
             verify_expect=render_text(s.verify_expect, values) if s.verify_expect else None,
             timeout_seconds=s.timeout_seconds,
+            skip_argv=render_argv(s.skip_if, values) if s.skip_if else None,
+            skip_if_expect=render_text(s.skip_if_expect, values) if s.skip_if_expect else None,
         ))
     teardown = [PlannedTeardown(id=t.id, description=render_text(t.description, values), risk=t.risk,
                                 manual=t.manual, argv=render_argv(t.command, values) if t.command else None)
@@ -933,6 +721,7 @@ def new_run_record(plan: Plan, mode: str = "apply") -> dict:
             "verify_argv": s.verify_argv, "verify_expect": s.verify_expect, "status": "pending",
             "started_at": None, "finished_at": None, "exit_code": None, "verify_status": None,
             "output_tail": None, "timeout_seconds": s.timeout_seconds,
+            "skip_argv": s.skip_argv, "skip_if_expect": s.skip_if_expect, "skip_reason": None,
         } for s in plan.steps],
         "teardown": [dict(t.to_dict(), status="not_run", exit_code=None, finished_at=None) for t in plan.teardown],
         "teardown_status": "not_run",
@@ -1043,7 +832,16 @@ class Executor:
                 self._emit("step_finished", step)
                 continue
 
-            result = self.runner(step["argv"], step.get("timeout_seconds") or 1800)
+            already = False
+            if step.get("skip_argv"):
+                sres = self.runner(step["skip_argv"], 120)
+                expect = step.get("skip_if_expect")
+                already = sres.returncode == 0 and (not expect or expect in sres.stdout)
+            if already:
+                step["skip_reason"] = "already done: skip_if check matched, command not run"
+                result = CommandResult(0, "", "")
+            else:
+                result = self.runner(step["argv"], step.get("timeout_seconds") or 1800)
             step["exit_code"] = result.returncode
             step["output_tail"] = _tail(result.stdout + ("\n" + result.stderr if result.stderr else ""))
             if result.returncode != 0:
@@ -1355,6 +1153,12 @@ def doctor(blueprints_dir: Optional[str] = None, state_dir: Optional[str] = None
             "clasp credentials present" if rc.is_file() else "clasp is not logged in",
             None if rc.is_file() else "run: clasp login (and enable the Apps Script API at "
                                       "https://script.google.com/home/usersettings)")
+
+    if "firebase" in needed and which("firebase"):
+        fb = Path.home() / ".config" / "configstore" / "firebase-tools.json"
+        add("firebase-auth", "pass" if fb.is_file() else "warn",
+            "firebase-tools credentials present" if fb.is_file() else "firebase-tools is not logged in",
+            None if fb.is_file() else "run: firebase login")
 
     key_name = ai_key_present(env)
     try:

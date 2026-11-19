@@ -23,6 +23,7 @@ Tool setup:
 | Tool | Install | Sign in |
 |---|---|---|
 | Google Cloud CLI | https://cloud.google.com/sdk/docs/install | `gcloud auth login` (and `gcloud auth application-default login` for local SDK runs) |
+| Firebase CLI | `npm install -g firebase-tools` | `firebase login` |
 | clasp | `npm install -g @google/clasp` | `clasp login`, then enable the Apps Script API at https://script.google.com/home/usersettings |
 
 ### Where blueprints come from
@@ -67,6 +68,17 @@ region: europe-west1
 
 `doogle plan solo-serverless-api --vars-file vars.yaml`
 
+### Blueprint freshness
+
+Google CLIs change. Every blueprint records `last_verified`, `verification_status`
+(`simulated`, `syntax-checked`, `live`) and `verified_versions`. `doogle list` shows them and
+warns about blueprints older than 180 days; `doogle list --stale` lists only those. Before
+applying a stale blueprint, compare its commands (from `doogle plan`) with the official docs, or
+run `python scripts/check_cli_syntax.py` with your installed CLIs (reads `--help` only).
+
+Steps with a `skip_if` check are safe to re-run: if the resource already exists, the command is
+skipped and the run record says so.
+
 ## 3. Driving Doogle from an agent
 
 Coding agents and multi-agent tools should use structured output and exit codes, never scrape text.
@@ -77,6 +89,8 @@ doogle explain <id> --json                 # -> .when_not_to_use, .variables, .s
 doogle plan <id> --var ... --json          # -> .steps[].command/argv/risk, .summary.warnings
 doogle doctor --json                       # -> .status pass|warn|fail, .checks[]
 doogle history --json
+doogle list --stale --json                 # -> .stale[] ids not verified in 180 days
+doogle share <id> --json                   # -> .badge_markdown, .markdown
 ```
 
 | Exit code | Meaning | Agent should |
@@ -99,7 +113,10 @@ Rules for agents:
 * Never run unreviewed destructive commands (deleting projects, databases or buckets) automatically.
   The validator forbids project deletion outright and forces deletes to be high-risk.
 * Keep `pytest` green before merging any PR or pushing a release tag. CI runs tests on Python
-  3.10-3.13, `doogle validate`, a wheel build and an installed-wheel smoke test.
+  3.10-3.13, `doogle validate`, `doogle docs --check`, a wheel build and an installed-wheel smoke test.
+  CodeQL scans Python and workflows; a weekly freshness workflow reports stale blueprints and
+  checks every command against the latest gcloud / firebase-tools / clasp `--help`.
+* After editing any blueprint, run `doogle docs` and commit the regenerated files.
 * Keep the non-affiliation note in README.md.
 * Re-check blueprint commands against current official docs at least each release; Google CLIs
   rename flags over time.
@@ -116,10 +133,12 @@ Rules for agents:
 | `state file ... is not valid JSON` | Move `.doogle/state.json` aside; Doogle starts a fresh one |
 | `blueprint's steps changed since this run was recorded` | The blueprint was edited; tear down the old run and start a new one |
 | `--ai` says it used offline routing | Install `.[ai]`, set `GEMINI_API_KEY`, check network/quota |
+| `doogle docs --check` fails in CI | Run `doogle docs` locally and commit `docs/DECISION_MATRIX.md` and `README.md` |
+| `schema_version must be 2` | Your custom blueprint is v1; add `maintainer`, `last_verified`, `verification_status`, `verified_versions` |
 
 ## 6. Publishing this repository
 
 ```bash
-git remote add origin https://github.com/<you>/doogle.git
+git remote add origin https://github.com/OWNER/REPO.git
 git push -u origin main
 ```

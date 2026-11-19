@@ -1,0 +1,65 @@
+name: Blueprint freshness
+
+# Weekly drift report. Needs no secrets and makes no cloud calls: it only
+# validates blueprints, lists stale ones, and checks every subcommand/flag
+# against the latest public CLIs' --help output.
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install doogle
+        run: pip install -e .
+      - name: Validate blueprints
+        run: doogle validate
+      - name: Report stale blueprints
+        run: |
+          doogle list --stale --json > stale.json
+          python - <<'PY'
+          import json, os
+          data = json.load(open("stale.json"))
+          rows = data["blueprints"]
+          lines = [f"## Stale blueprints (not verified in {data['stale_after_days']} days)", ""]
+          if not rows:
+              lines.append("None. All blueprints were verified recently.")
+          for b in rows:
+              f = b["freshness"]
+              lines.append(f"- `{b['id']}`: {f['verification_status']}, last verified {f['last_verified']} "
+                           f"({f['age_days']} days ago), maintainer {b['maintainer']}")
+              print(f"::warning title=Stale blueprint::{b['id']} last verified {f['last_verified']}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write("\n".join(lines) + "\n")
+          PY
+
+  cli-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: google-github-actions/setup-gcloud@v2   # installs the CLI only; no auth is configured
+      - name: Install CLIs and doogle
+        run: |
+          npm install -g firebase-tools @google/clasp
+          pip install -e .
+      - name: Check blueprint commands against current CLI --help
+        env:
+          CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
+        run: |
+          python scripts/check_cli_syntax.py | tee syntax.txt
+          { echo '## CLI syntax check'; echo '```'; cat syntax.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

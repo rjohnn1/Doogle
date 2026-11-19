@@ -1,8 +1,16 @@
-schema_version: 1
+schema_version: 2
 id: gemini-adk-service
 name: Gemini ADK Agent Service on Cloud Run + Vertex AI
 category: ai
 tagline: Deploy an Agent Development Kit (ADK) agent backed by Gemini on Vertex AI as a private Cloud Run service with its own least-privilege identity.
+maintainer: "@OWNER"  # TODO(maintainer): replace with your GitHub handle before publishing
+last_verified: "2026-11-19"
+verification_status: syntax-checked
+verified_versions:
+  gcloud: "594.0.0"
+  python: "3.13.5"
+verification_notes: >-
+  Every subcommand and flag was checked against the installed gcloud 594.0.0 --help output with scripts/check_cli_syntax.py, and the full plan/apply/verify/teardown flow was run against stub CLIs in the test suite. It has NOT yet been run against a live Google Cloud project; expect first-run issues such as missing permissions or IAM propagation delays, and please report them with the drift issue template.
 keywords:
   - agent
   - ai agent
@@ -93,9 +101,11 @@ steps:
     verify_command: gcloud services list --enabled --project {{project_id}} '--filter=config.name=aiplatform.googleapis.com' '--format=value(config.name)'
     verify_expect: aiplatform.googleapis.com
   - id: create-service-account
-    description: Create the dedicated runtime service account {{service_account_name}}.
+    description: Create the dedicated runtime service account {{service_account_name}} (skipped if it exists).
     command: gcloud iam service-accounts create {{service_account_name}} --display-name "Doogle ADK agent runtime" --project {{project_id}}
     risk: medium
+    skip_if: gcloud iam service-accounts describe {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --project {{project_id}} '--format=value(email)'
+    skip_if_expect: "{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
     verify_command: gcloud iam service-accounts describe {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --project {{project_id}} '--format=value(email)'
     verify_expect: "{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
   - id: grant-vertex-user

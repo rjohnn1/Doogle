@@ -1,0 +1,143 @@
+schema_version: 2
+id: ai-studio-to-vertex
+name: Graduate a Gemini Prototype from AI Studio to Vertex AI
+category: ai
+tagline: Move a Gemini app from an AI Studio API key to Vertex AI with IAM, Application Default Credentials and a least-privilege runtime service account, with no code rewrite.
+maintainer: "@OWNER"  # TODO(maintainer): replace with your GitHub handle before publishing
+last_verified: "2026-11-19"
+verification_status: syntax-checked
+verified_versions:
+  gcloud: "594.0.0"
+  python: "3.13.5"
+verification_notes: >-
+  Every subcommand and flag was checked against the installed gcloud 594.0.0 --help output with scripts/check_cli_syntax.py, and the full plan/apply/verify/teardown flow was run against stub CLIs in the test suite. It has NOT yet been run against a live Google Cloud project; expect first-run issues such as missing permissions or IAM propagation delays, and please report them with the drift issue template.
+keywords:
+  - ai studio
+  - aistudio
+  - gemini api
+  - api key
+  - gemini
+  - vertex ai
+  - vertex
+  - migrate
+  - migration
+  - graduate
+  - production
+  - enterprise
+  - prototype to production
+  - google-genai
+  - adc
+  - application default credentials
+  - service account
+  - iam
+when_to_use:
+  - You prototyped with a Gemini API key from Google AI Studio and now need IAM-based access, data governance, VPC/region controls or Google Cloud billing and quotas.
+  - Your code already uses the google-genai SDK (Python, JS, Go or Java), so switching is a configuration change, not a rewrite.
+  - You want to stop shipping or storing API keys and use Application Default Credentials locally and a service account in production.
+when_not_to_use:
+  - "A hobby or early prototype that is happy on the Gemini API free tier: stay on AI Studio; Vertex AI has no free model quota."
+  - "You need a feature that is only in the Gemini Developer API (check the feature comparison in the docs) before moving."
+  - "You also need to host an agent with tools: use the gemini-adk-service blueprint, which includes this setup plus Cloud Run."
+  - "Your app runs outside Google Cloud and cannot use a service account safely: consider Workload Identity Federation before creating any key files (never download service-account keys for this)."
+services:
+  - name: Vertex AI (Gemini models)
+    role: Serves the same Gemini models through your Google Cloud project, with IAM, quotas and audit logs.
+  - name: IAM service account
+    role: Runtime identity for your deployed app, granted only roles/aiplatform.user.
+  - name: Application Default Credentials (ADC)
+    role: Lets the SDK find credentials automatically, from your gcloud login locally or the attached service account in production.
+  - name: Google AI Studio
+    role: Where the old API key lives; delete or restrict it once Vertex AI works.
+estimated_cost: >-
+  Vertex AI bills Gemini per input and output token, by model, with no free model quota, and
+  needs a billing account. Enabling the API and creating the service account cost nothing by
+  themselves. Compare the official Vertex AI generative AI pricing page with Gemini API pricing
+  and set a budget alert before switching traffic.
+prerequisites:
+  - "gcloud installed and logged in (gcloud auth login) as a user who can change IAM in the project."
+  - A Google Cloud project with billing enabled (it can be the project behind your AI Studio key).
+  - Code that uses the google-genai SDK. Older google-generativeai code should be migrated to google-genai first (see GUIDE.md).
+docs:
+  - https://cloud.google.com/vertex-ai/generative-ai/docs/migrate/migrate-google-ai
+  - https://googleapis.github.io/python-genai/
+  - https://cloud.google.com/docs/authentication/provide-credentials-adc
+  - https://cloud.google.com/vertex-ai/generative-ai/pricing
+variables:
+  - key: project_id
+    prompt: Google Cloud project ID for Vertex AI
+    pattern: "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+    example: my-gemini-app-123
+  - key: vertex_location
+    prompt: Vertex AI location for Gemini calls (a region such as us-central1, or 'global')
+    default: global
+    pattern: "^(global|[a-z]+-[a-z]+[0-9]+)$"
+  - key: service_account_name
+    prompt: Name for the app's runtime service account (6-30 chars)
+    default: gemini-app-runtime
+    pattern: "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+steps:
+  - id: check-project
+    description: Confirm the project exists and your gcloud account can see it (read-only).
+    command: gcloud projects describe {{project_id}} '--format=value(projectId)'
+    risk: low
+  - id: enable-vertex-ai
+    description: Enable the Vertex AI API in {{project_id}}.
+    command: gcloud services enable aiplatform.googleapis.com --project {{project_id}}
+    risk: medium
+    verify_command: gcloud services list --enabled --project {{project_id}} '--filter=config.name=aiplatform.googleapis.com' '--format=value(config.name)'
+    verify_expect: aiplatform.googleapis.com
+  - id: create-service-account
+    description: Create the runtime service account {{service_account_name}} for your deployed app (skipped if it exists).
+    command: gcloud iam service-accounts create {{service_account_name}} --display-name "Gemini app runtime (Doogle)" --project {{project_id}}
+    risk: medium
+    skip_if: gcloud iam service-accounts describe {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --project {{project_id}} '--format=value(email)'
+    skip_if_expect: "{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
+    verify_command: gcloud iam service-accounts describe {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --project {{project_id}} '--format=value(email)'
+    verify_expect: "{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
+  - id: grant-vertex-user
+    description: Grant only roles/aiplatform.user to the runtime service account (IAM change).
+    command: gcloud projects add-iam-policy-binding {{project_id}} --member serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --role roles/aiplatform.user --condition None
+    risk: high
+    verify_command: gcloud projects get-iam-policy {{project_id}} --flatten bindings[].members --filter bindings.role:roles/aiplatform.user '--format=value(bindings.members)'
+    verify_expect: "serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
+  - id: local-adc-login
+    description: >-
+      On your development machine run 'gcloud auth application-default login' (opens a browser) and
+      'gcloud auth application-default set-quota-project {{project_id}}'. Your own user needs
+      roles/aiplatform.user (project Owners and Editors already have the needed permission).
+    manual: true
+  - id: switch-app-config
+    description: >-
+      Remove GEMINI_API_KEY / GOOGLE_API_KEY from your app's environment and set
+      GOOGLE_GENAI_USE_VERTEXAI=True, GOOGLE_CLOUD_PROJECT={{project_id}},
+      GOOGLE_CLOUD_LOCATION={{vertex_location}} (or pass vertexai=True, project, location to
+      genai.Client). Run your app's tests and the smoke test in GUIDE.md.
+    manual: true
+  - id: attach-runtime-identity
+    description: >-
+      When you deploy (Cloud Run, Cloud Functions, GKE...), run the app as
+      {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com, e.g.
+      'gcloud run deploy ... --service-account {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com'.
+      Do not create or download service-account key files.
+    manual: true
+  - id: retire-api-key
+    description: >-
+      Only after Vertex AI works in production: delete or restrict the old API key in Google AI
+      Studio (API keys page) or with 'gcloud services api-keys list/delete --project PROJECT_THAT_OWNS_THE_KEY',
+      and remove it from every secret store and CI variable.
+    manual: true
+teardown:
+  - id: remove-vertex-binding
+    description: Remove the roles/aiplatform.user binding from the runtime service account.
+    command: gcloud projects remove-iam-policy-binding {{project_id}} --member serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --role roles/aiplatform.user --condition None
+    risk: high
+  - id: delete-service-account
+    description: Delete the runtime service account {{service_account_name}}. Anything still running as it will lose access.
+    command: gcloud iam service-accounts delete {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --project {{project_id}} --quiet
+    risk: high
+  - id: revert-local-and-app
+    description: >-
+      Locally run 'gcloud auth application-default revoke' if you no longer need ADC, and switch the
+      app's environment back to an API key only if you are deliberately returning to AI Studio. The
+      Vertex AI API stays enabled; disabling it can break other workloads in the project.
+    manual: true

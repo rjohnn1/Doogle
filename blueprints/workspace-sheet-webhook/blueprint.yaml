@@ -1,8 +1,16 @@
-schema_version: 1
+schema_version: 2
 id: workspace-sheet-webhook
 name: Google Sheet + Apps Script Webhook
 category: workspace
 tagline: Turn a new Google Sheet into a webhook receiver with a container-bound Apps Script web app, managed from your terminal with clasp.
+maintainer: "@OWNER"  # TODO(maintainer): replace with your GitHub handle before publishing
+last_verified: "2026-11-19"
+verification_status: syntax-checked
+verified_versions:
+  "@google/clasp": "3.4.1"
+  python: "3.13.5"
+verification_notes: >-
+  Every subcommand and flag was checked against the installed clasp 3.4.1 --help output with scripts/check_cli_syntax.py, and the full plan/apply/verify/teardown flow was run against stub CLIs in the test suite. It has NOT yet been run against a live Google Cloud project; expect first-run issues such as missing permissions or IAM propagation delays, and please report them with the drift issue template.
 keywords:
   - sheet
   - spreadsheet

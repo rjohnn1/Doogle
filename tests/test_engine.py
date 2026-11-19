@@ -19,7 +19,8 @@ from doogle import engine as E
 
 REPO = Path(__file__).resolve().parents[1]
 BLUEPRINTS = REPO / "blueprints"
-SHIPPED = ["gemini-adk-service", "solo-serverless-api", "workspace-sheet-webhook"]
+SHIPPED = ["ai-studio-to-vertex", "firebase-auth-mvp", "gemini-adk-service", "solo-serverless-api",
+           "workspace-sheet-webhook"]
 
 
 # --------------------------------------------------------------------------- fixtures
@@ -27,11 +28,15 @@ SHIPPED = ["gemini-adk-service", "solo-serverless-api", "workspace-sheet-webhook
 
 def minimal_data(**overrides) -> dict:
     data = {
-        "schema_version": 1,
+        "schema_version": 2,
         "id": "demo-bp",
         "name": "Demo",
         "category": "test",
         "tagline": "A demo blueprint.",
+        "maintainer": "@someone",
+        "last_verified": "2026-01-15",
+        "verification_status": "simulated",
+        "verified_versions": {"tool1": "1.2.3", "tool2": "unverified"},
         "keywords": ["demo"],
         "when_to_use": ["testing"],
         "when_not_to_use": ["production: use something simpler"],
@@ -123,7 +128,7 @@ def test_shipped_blueprint_contract(bp_id):
 
 def test_shipped_blueprints_use_no_shell_and_known_tools():
     for bp in E.Catalog(BLUEPRINTS):
-        assert set(bp.required_tools()) <= {"gcloud", "clasp", "test", "firebase", "adk"}
+        assert set(bp.required_tools()) <= {"gcloud", "clasp", "test", "firebase", "adk", "curl"}
 
 
 # --------------------------------------------------------------------------- validator
