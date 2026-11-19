@@ -339,6 +339,7 @@ def test_teardown_warns_when_blueprint_changed(store):
 
 # --------------------------------------------------------------------------- state file robustness
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
 def test_state_file_and_dir_permissions(store):
     _applied(store)
     assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
@@ -527,6 +528,7 @@ def test_stored_and_printed_output_is_redacted(store):
 
 # --------------------------------------------------------------------------- subprocess runner
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX exec bits")
 def test_runner_survives_binary_output_and_non_executables(tmp_path):
     res = E.subprocess_runner([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'\\xff\\xfe ok')"], 30)
     assert res.returncode == 0 and "ok" in res.stdout
@@ -560,6 +562,7 @@ def test_cli_prompt_eof_is_clean(capsys, monkeypatch, tmp_path):
     assert code == 2 and "pass --var project_id=" in err
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
 def test_cli_unwritable_state_dir_is_clean(capsys, tmp_path, monkeypatch):
     if os.geteuid() == 0:
         pytest.skip("root ignores permissions")
