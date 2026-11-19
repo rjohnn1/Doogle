@@ -66,3 +66,26 @@ also_copy = ["blueprints", "docs", ".github", "demo", "scripts", "README.md", "C
 pytest_add_cli_args_test_selection = ["tests/"]
 pytest_add_cli_args = ["-q", "-p", "no:cacheprovider", "--deselect", "tests/test_hardening.py::test_real_sigint_mid_step_via_cli",
                        "--deselect", "tests/test_hardening.py::test_concurrent_writers_never_lose_runs"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "C90", "PLE", "PLW", "PERF", "DTZ"]
+ignore = ["S101", "S603", "S404", "RUF001", "RUF002", "RUF003", "PERF401", "DTZ011"]  # DTZ011: freshness uses the local calendar day on purpose
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "PLW", "PERF", "DTZ", "E731", "B023"]
+"scripts/*" = ["S"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 45  # validator/doctor are flat checklists; see docs/QUALITY_REPORT.md
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src/doogle"]
+strict = true
+ignore_missing_imports = true
+warn_unused_ignores = true

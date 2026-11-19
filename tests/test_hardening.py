@@ -3,6 +3,7 @@ property-based rendering, concurrency, interruption and redaction."""
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import multiprocessing as mp
@@ -23,13 +24,13 @@ from hypothesis import strategies as st
 from doogle import cli
 from doogle import engine as E
 from doogle import validator as V
-
 from test_engine import ALL_TOOLS, BLUEPRINTS, FakeRunner, make_bp, minimal_data, run_cli, write_bp_dir
 
 GATES = E.Gates(yes=True, approve_high_risk=True)
 SHIPPED_DATA = {p.parent.name: yaml.safe_load(p.read_text(encoding="utf-8"))
                 for p in sorted(BLUEPRINTS.glob("[!_]*/blueprint.yaml"))}
-FUZZ = settings(max_examples=int(os.environ.get("DOOGLE_FUZZ_EXAMPLES", "300")), deadline=None, suppress_health_check=[HealthCheck.too_slow])
+FUZZ = settings(max_examples=int(os.environ.get("DOOGLE_FUZZ_EXAMPLES", "300")), deadline=None,
+                suppress_health_check=[HealthCheck.too_slow])
 
 
 @pytest.fixture
@@ -93,10 +94,8 @@ def test_hostile_values_rejected_with_clean_error(value):
 @FUZZ
 @given(st.text(max_size=300))
 def test_render_never_crashes_unexpectedly(template):
-    try:
+    with contextlib.suppress(E.VariableError, ValueError):
         E.render_argv(template, {"a": "x"})
-    except (E.VariableError, ValueError):
-        pass
 
 
 # --------------------------------------------------------------------------- validator fuzzing
@@ -379,10 +378,8 @@ def test_any_truncation_is_a_clean_error(tmp_path_factory, cut):
     s.save_run({"run_id": "r1", "steps": [{"id": "a", "status": "succeeded"}], "teardown": [], "variables": {}})
     full = path.read_text(encoding="utf-8")
     path.write_text(full[: min(cut, len(full) - 1)], encoding="utf-8")
-    try:
+    with contextlib.suppress(E.StateError):
         s.runs()
-    except E.StateError:
-        pass
 
 
 def _writer(args):
@@ -459,9 +456,9 @@ def test_real_sigint_mid_step_via_cli(tmp_path):
     write_bp_dir(bps, data)
     env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}", DOOGLE_STATE_DIR=str(tmp_path / "st"))
     base = [sys.executable, "-m", "doogle"]
-    proc = subprocess.Popen(base + ["plan", "demo-bp", "--blueprints-dir", str(bps), "--var", "project_id=demo-project",
-                                    "--apply", "--yes", "--approve-high-risk"], env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    apply = ["plan", "demo-bp", "--blueprints-dir", str(bps), "--var", "project_id=demo-project",
+             "--apply", "--yes", "--approve-high-risk"]
+    proc = subprocess.Popen([*base, *apply], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     for _ in range(200):
         if marker.exists():
             break
@@ -475,11 +472,11 @@ def test_real_sigint_mid_step_via_cli(tmp_path):
     run = state["runs"][-1]
     assert run["status"] == "interrupted" and run["steps"][1]["status"] == "interrupted"
     (tmp_path / "fast").write_text("x")
-    r = subprocess.run(base + ["resume", "latest", "--blueprints-dir", str(bps), "--yes", "--approve-high-risk"],
+    r = subprocess.run([*base, "resume", "latest", "--blueprints-dir", str(bps), "--yes", "--approve-high-risk"],
                        env=env, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr
-    r = subprocess.run(base + ["teardown", "latest", "--blueprints-dir", str(bps), "--apply", "--yes",
-                               "--approve-high-risk", "--json"], env=env, capture_output=True, text=True, timeout=60)
+    teardown = ["teardown", "latest", "--blueprints-dir", str(bps), "--apply", "--yes", "--approve-high-risk", "--json"]
+    r = subprocess.run([*base, *teardown], env=env, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout)["teardown_status"] == "succeeded"
 

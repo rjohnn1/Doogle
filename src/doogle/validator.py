@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Iterable, Iterator
 from datetime import date
-from typing import Any, Iterable, Iterator, Optional
+from typing import Any
 
 import yaml
 
@@ -87,7 +88,7 @@ def _str_list(value: Any) -> bool:
     return isinstance(value, list) and len(value) > 0 and all(_nonempty_str(v) for v in value)
 
 
-def _validate_command(where: str, command: Any, declared: set[str], errors: list[str]) -> Optional[list[str]]:
+def _validate_command(where: str, command: Any, declared: set[str], errors: list[str]) -> list[str] | None:
     if not _nonempty_str(command):
         errors.append(f"{where}: command must be a non-empty string")
         return None
@@ -170,7 +171,7 @@ def _readonly_problems(tokens: list[str]) -> list[str]:
     return problems
 
 
-def parse_date(value: Any) -> Optional[date]:
+def parse_date(value: Any) -> date | None:
     """Accept a YAML date or an ISO ``YYYY-MM-DD`` string."""
     if isinstance(value, date):
         return value
@@ -182,11 +183,11 @@ def parse_date(value: Any) -> Optional[date]:
     return None
 
 
-def _as_list(value: Any) -> list:
+def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def required_tools_from_data(data: dict) -> set[str]:
+def required_tools_from_data(data: dict[str, Any]) -> set[str]:
     tools = set(t for t in _as_list(data.get("requires_tools")) if isinstance(t, str))
     for group in ("steps", "teardown"):
         for item in _as_list(data.get(group)):
@@ -204,7 +205,7 @@ def required_tools_from_data(data: dict) -> set[str]:
     return tools
 
 
-def _validate_freshness(data: dict, errors: list[str], today: Optional[date]) -> None:
+def _validate_freshness(data: dict[str, Any], errors: list[str], today: date | None) -> None:
     today = today or date.today()
     if "maintainer" in data and not _nonempty_str(data.get("maintainer")):
         errors.append("'maintainer' must be a non-empty string (a GitHub handle or team)")
@@ -272,8 +273,8 @@ def _depth(value: Any, limit: int = MAX_DEPTH) -> int:
     return deepest
 
 
-def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
-                            today: Optional[date] = None) -> list[str]:
+def validate_blueprint_data(data: Any, folder_name: str | None = None,
+                            today: date | None = None) -> list[str]:
     """Strict schema check (spec section 5). Returns a list of error strings."""
     errors: list[str] = []
     if not isinstance(data, dict):
@@ -283,6 +284,14 @@ def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
     if not all(isinstance(k, str) for k in data):
         return ["top-level keys must be strings"]
 
+    _validate_header(data, folder_name, today, errors)
+    declared = _validate_variables(data, errors)
+    step_ids = _validate_steps(data, declared, errors)
+    _validate_teardown(data, declared, step_ids, errors)
+    return errors
+
+
+def _validate_header(data: dict[str, Any], folder_name: str | None, today: date | None, errors: list[str]) -> None:
     for key in TOP_LEVEL_REQUIRED:
         if key not in data:
             errors.append(f"missing required field '{key}'")
@@ -332,11 +341,14 @@ def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
             errors.append("'services' must be a non-empty list")
         else:
             for i, svc in enumerate(services):
-                if not isinstance(svc, dict) or not _nonempty_str(svc.get("name")) or not _nonempty_str(svc.get("role")):
+                if not (isinstance(svc, dict) and _nonempty_str(svc.get("name")) and _nonempty_str(svc.get("role"))):
                     errors.append(f"services[{i}] must have non-empty 'name' and 'role'")
                 elif set(svc) - {"name", "role", "docs"}:
                     errors.append(f"services[{i}] has unknown field(s): {sorted(set(svc) - {'name', 'role', 'docs'})}")
 
+
+
+def _validate_variables(data: dict[str, Any], errors: list[str]) -> set[str]:
     declared: set[str] = set()
     variables = data.get("variables")
     if "variables" in data:
@@ -376,6 +388,10 @@ def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
                     if default is not None and not compiled.fullmatch(str(default)):
                         errors.append(f"{where}: default '{default}' does not match its pattern")
 
+    return declared
+
+
+def _validate_steps(data: dict[str, Any], declared: set[str], errors: list[str]) -> set[str]:
     steps = data.get("steps")
     step_ids: set[str] = set()
     if "steps" in data:
@@ -385,74 +401,81 @@ def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
         if steps and all(isinstance(s, dict) and s.get("manual") for s in steps):
             errors.append("'steps' must contain at least one automated (non-manual) step")
         for i, step in enumerate(steps):
-            where = f"steps[{i}]"
-            if not isinstance(step, dict):
-                errors.append(f"{where} must be a mapping")
-                continue
-            sid = step.get("id")
-            if isinstance(sid, str):
-                where = f"steps[{i}] '{sid}'"
-            extra = set(step) - STEP_FIELDS
-            if extra:
-                errors.append(f"{where} has unknown field(s): {sorted(extra)}")
-            if not isinstance(sid, str) or not ID_RE.match(sid):
-                errors.append(f"{where}: id must be lowercase kebab-case")
-            elif sid in step_ids:
-                errors.append(f"{where}: duplicate step id")
-            else:
-                step_ids.add(sid)
-            if not _nonempty_str(step.get("description")):
-                errors.append(f"{where}: description must be a non-empty string")
-            risk = step.get("risk", "low")
-            if risk not in RISK_LEVELS:
-                errors.append(f"{where}: risk must be one of {list(RISK_LEVELS)}")
-            if "public_exposure" in step and not isinstance(step["public_exposure"], bool):
-                errors.append(f"{where}: public_exposure must be true/false")
-            if "manual" in step and not isinstance(step["manual"], bool):
-                errors.append(f"{where}: manual must be true/false")
-            if "timeout_seconds" in step and (not isinstance(step["timeout_seconds"], int)
-                                              or step["timeout_seconds"] <= 0):
-                errors.append(f"{where}: timeout_seconds must be a positive integer")
-            if step.get("manual"):
-                for f_ in ("command", "verify_command", "verify_expect", "skip_if", "skip_if_expect"):
-                    if f_ in step:
-                        errors.append(f"{where}: manual steps must not define '{f_}'")
-                continue
-            toks = _validate_command(where, step.get("command"), declared, errors)
-            if toks and _is_destructive(toks) and risk != "high":
-                errors.append(f"{where}: destructive command must be marked risk: high")
-            if toks and toks[0] == "curl":
-                for problem in _readonly_problems(toks):
-                    errors.append(f"{where}: curl may only be used read-only ({problem})")
-            if "verify_command" in step:
-                vtoks = _validate_command(f"{where} verify_command", step["verify_command"], declared, errors)
-                if vtoks:
-                    for problem in _readonly_problems(vtoks):
-                        errors.append(f"{where}: verify_command must be read-only ({problem})")
-            if "verify_expect" in step:
-                if not _nonempty_str(step["verify_expect"]):
-                    errors.append(f"{where}: verify_expect must be a non-empty string")
-                elif "verify_command" not in step:
-                    errors.append(f"{where}: verify_expect requires verify_command")
-                else:
-                    for m in PLACEHOLDER_RE.finditer(step["verify_expect"]):
-                        if m.group(1) not in declared:
-                            errors.append(f"{where}: verify_expect placeholder '{m.group(1)}' is not declared")
-            if "skip_if" in step:
-                stoks = _validate_command(f"{where} skip_if", step["skip_if"], declared, errors)
-                if stoks:
-                    for problem in _readonly_problems(stoks):
-                        errors.append(f"{where}: skip_if must be read-only ({problem})")
-            if "skip_if_expect" in step:
-                if not _nonempty_str(step["skip_if_expect"]):
-                    errors.append(f"{where}: skip_if_expect must be a non-empty string")
-                elif "skip_if" not in step:
-                    errors.append(f"{where}: skip_if_expect requires skip_if")
-                else:
-                    for m in PLACEHOLDER_RE.finditer(step["skip_if_expect"]):
-                        if m.group(1) not in declared:
-                            errors.append(f"{where}: skip_if_expect placeholder '{m.group(1)}' is not declared")
+            _validate_step(i, step, declared, step_ids, errors)
+    return step_ids
 
+
+def _validate_step(i: int, step: Any, declared: set[str], step_ids: set[str], errors: list[str]) -> None:
+    where = f"steps[{i}]"
+    if not isinstance(step, dict):
+        errors.append(f"{where} must be a mapping")
+        return
+    sid = step.get("id")
+    if isinstance(sid, str):
+        where = f"steps[{i}] '{sid}'"
+    extra = set(step) - STEP_FIELDS
+    if extra:
+        errors.append(f"{where} has unknown field(s): {sorted(extra)}")
+    if not isinstance(sid, str) or not ID_RE.match(sid):
+        errors.append(f"{where}: id must be lowercase kebab-case")
+    elif sid in step_ids:
+        errors.append(f"{where}: duplicate step id")
+    else:
+        step_ids.add(sid)
+    if not _nonempty_str(step.get("description")):
+        errors.append(f"{where}: description must be a non-empty string")
+    risk = step.get("risk", "low")
+    if risk not in RISK_LEVELS:
+        errors.append(f"{where}: risk must be one of {list(RISK_LEVELS)}")
+    if "public_exposure" in step and not isinstance(step["public_exposure"], bool):
+        errors.append(f"{where}: public_exposure must be true/false")
+    if "manual" in step and not isinstance(step["manual"], bool):
+        errors.append(f"{where}: manual must be true/false")
+    if "timeout_seconds" in step and (not isinstance(step["timeout_seconds"], int)
+                                      or step["timeout_seconds"] <= 0):
+        errors.append(f"{where}: timeout_seconds must be a positive integer")
+    if step.get("manual"):
+        for f_ in ("command", "verify_command", "verify_expect", "skip_if", "skip_if_expect"):
+            if f_ in step:
+                errors.append(f"{where}: manual steps must not define '{f_}'")
+        return
+    toks = _validate_command(where, step.get("command"), declared, errors)
+    if toks and _is_destructive(toks) and risk != "high":
+        errors.append(f"{where}: destructive command must be marked risk: high")
+    if toks and toks[0] == "curl":
+        for problem in _readonly_problems(toks):
+            errors.append(f"{where}: curl may only be used read-only ({problem})")
+    if "verify_command" in step:
+        vtoks = _validate_command(f"{where} verify_command", step["verify_command"], declared, errors)
+        if vtoks:
+            for problem in _readonly_problems(vtoks):
+                errors.append(f"{where}: verify_command must be read-only ({problem})")
+    if "verify_expect" in step:
+        if not _nonempty_str(step["verify_expect"]):
+            errors.append(f"{where}: verify_expect must be a non-empty string")
+        elif "verify_command" not in step:
+            errors.append(f"{where}: verify_expect requires verify_command")
+        else:
+            for m in PLACEHOLDER_RE.finditer(step["verify_expect"]):
+                if m.group(1) not in declared:
+                    errors.append(f"{where}: verify_expect placeholder '{m.group(1)}' is not declared")
+    if "skip_if" in step:
+        stoks = _validate_command(f"{where} skip_if", step["skip_if"], declared, errors)
+        if stoks:
+            for problem in _readonly_problems(stoks):
+                errors.append(f"{where}: skip_if must be read-only ({problem})")
+    if "skip_if_expect" in step:
+        if not _nonempty_str(step["skip_if_expect"]):
+            errors.append(f"{where}: skip_if_expect must be a non-empty string")
+        elif "skip_if" not in step:
+            errors.append(f"{where}: skip_if_expect requires skip_if")
+        else:
+            for m in PLACEHOLDER_RE.finditer(step["skip_if_expect"]):
+                if m.group(1) not in declared:
+                    errors.append(f"{where}: skip_if_expect placeholder '{m.group(1)}' is not declared")
+
+
+def _validate_teardown(data: dict[str, Any], declared: set[str], step_ids: set[str], errors: list[str]) -> None:
     teardown = data.get("teardown")
     if "teardown" in data:
         if not isinstance(teardown, list) or not teardown:
@@ -509,7 +532,6 @@ def validate_blueprint_data(data: Any, folder_name: Optional[str] = None,
                 errors.append(f"{where}: destructive command must be marked risk: high")
         if teardown and not has_command:
             errors.append("'teardown' must include at least one command")
-    return errors
 
 
 # --------------------------------------------------------------------------- safe loading
@@ -520,7 +542,7 @@ class _NoAliasSafeLoader(yaml.SafeLoader):
 
     def compose_node(self, parent, index):  # type: ignore[no-untyped-def]
         if self.check_event(yaml.AliasEvent):
-            event = self.peek_event()
+            event = self.peek_event()  # type: ignore[no-untyped-call]
             raise yaml.composer.ComposerError(
                 None, None, "YAML aliases (*name) are not allowed in blueprints", event.start_mark)
         return super().compose_node(parent, index)

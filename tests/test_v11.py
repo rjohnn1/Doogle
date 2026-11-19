@@ -15,7 +15,6 @@ from doogle import __version__
 from doogle import docs as D
 from doogle import engine as E
 from doogle import validator as V
-
 from test_engine import ALL_TOOLS, BLUEPRINTS, REPO, FakeRunner, make_bp, minimal_data, run_cli, write_bp_dir
 
 TODAY = date(2026, 11, 19)

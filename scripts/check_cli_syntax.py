@@ -25,21 +25,21 @@ import shlex
 import shutil
 import subprocess
 import sys
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from doogle import engine as E  # noqa: E402
+from doogle import engine as E
 
 CHECKED_TOOLS = ("gcloud", "firebase", "clasp")
 ENV = dict(os.environ, CLOUDSDK_CORE_DISABLE_PROMPTS="1", NO_COLOR="1", FORCE_COLOR="0")
 
 
-@lru_cache(maxsize=None)
+@cache
 def help_text(argv: tuple[str, ...]) -> tuple[int, str]:
     try:
-        proc = subprocess.run([*argv, "--help"], capture_output=True, text=True, timeout=120,
+        proc = subprocess.run([*argv, "--help"], check=False, capture_output=True, text=True, timeout=120,
                               stdin=subprocess.DEVNULL, env=ENV)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, str(exc)
@@ -48,7 +48,7 @@ def help_text(argv: tuple[str, ...]) -> tuple[int, str]:
 
 def tool_version(tool: str) -> str:
     try:
-        out = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=60,
+        out = subprocess.run([tool, "--version"], check=False, capture_output=True, text=True, timeout=60,
                              stdin=subprocess.DEVNULL, env=ENV).stdout
     except (OSError, subprocess.TimeoutExpired):
         return "?"

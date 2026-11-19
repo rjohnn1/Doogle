@@ -13,8 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from doogle import __version__
-from doogle import cli
+from doogle import __version__, cli
 from doogle import engine as E
 
 REPO = Path(__file__).resolve().parents[1]
@@ -87,8 +86,8 @@ class FakeRunner:
         return E.CommandResult(0, " ".join(argv), "")
 
 
-ALL_TOOLS = lambda name: f"/usr/bin/{name}"  # noqa: E731
-NO_TOOLS = lambda name: None  # noqa: E731
+ALL_TOOLS = lambda name: f"/usr/bin/{name}"
+NO_TOOLS = lambda name: None
 
 
 @pytest.fixture
@@ -151,7 +150,8 @@ def test_shipped_blueprints_use_no_shell_and_known_tools():
     (lambda d: d["steps"][0].update(command="bash -c 'echo hi'"), "not an allowed tool"),
     (lambda d: d["steps"][0].update(command="sudo gcloud"), "not an allowed tool"),
     (lambda d: d["steps"][0].update(command="/usr/bin/gcloud x"), "bare tool name"),
-    (lambda d: d["steps"][0].update(command="gcloud projects delete {{project_id}}", risk="high"), "never be automated"),
+    (lambda d: d["steps"][0].update(command="gcloud projects delete {{project_id}}", risk="high"),
+     "never be automated"),
     (lambda d: d["steps"][0].update(command="gcloud run services delete x", risk="low"), "risk: high"),
     (lambda d: d["teardown"][0].update(risk="low"), "risk: high"),
     (lambda d: d["steps"][1].pop("command"), "command must be a non-empty string"),

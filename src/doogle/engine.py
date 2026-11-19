@@ -26,15 +26,16 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from importlib import resources
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence
+from typing import Any
 
 import yaml
 
-from .validator import (  # noqa: F401  (re-exported for backwards compatibility)
+from .validator import (
     ALLOWED_BINARIES,
     DESTRUCTIVE_TOKENS,
     FORBIDDEN_BINARIES,
@@ -47,14 +48,14 @@ from .validator import (  # noqa: F401  (re-exported for backwards compatibility
     SECRET_KEY_RE,
     SHELL_OPERATORS,
     STALE_AFTER_DAYS,
-    UNVERIFIED,
-    VERIFICATION_STATUSES,
     STEP_FIELDS,
     TEARDOWN_FIELDS,
     TOP_LEVEL_OPTIONAL,
     TOP_LEVEL_REQUIRED,
+    UNVERIFIED,
     VAR_KEY_RE,
     VARIABLE_FIELDS,
+    VERIFICATION_STATUSES,
     _tokens,
     parse_date,
     recorded_argv_problems,
@@ -63,11 +64,30 @@ from .validator import (  # noqa: F401  (re-exported for backwards compatibility
 )
 
 __all__ = [
-    "ALLOWED_BINARIES", "DESTRUCTIVE_TOKENS", "FORBIDDEN_BINARIES", "ID_RE", "NEVER_AUTOMATE",
-    "PLACEHOLDER_RE", "PRICE_RE", "RISK_LEVELS", "SCHEMA_VERSION", "SECRET_KEY_RE", "SHELL_OPERATORS",
-    "STALE_AFTER_DAYS", "UNVERIFIED", "VERIFICATION_STATUSES", "STEP_FIELDS", "TEARDOWN_FIELDS",
-    "TOP_LEVEL_OPTIONAL", "TOP_LEVEL_REQUIRED", "VAR_KEY_RE", "VARIABLE_FIELDS", "parse_date",
-    "recorded_argv_problems", "safe_load_blueprint_text", "validate_blueprint_data",
+    "ALLOWED_BINARIES",
+    "DESTRUCTIVE_TOKENS",
+    "FORBIDDEN_BINARIES",
+    "ID_RE",
+    "NEVER_AUTOMATE",
+    "PLACEHOLDER_RE",
+    "PRICE_RE",
+    "RISK_LEVELS",
+    "SCHEMA_VERSION",
+    "SECRET_KEY_RE",
+    "SHELL_OPERATORS",
+    "STALE_AFTER_DAYS",
+    "STEP_FIELDS",
+    "TEARDOWN_FIELDS",
+    "TOP_LEVEL_OPTIONAL",
+    "TOP_LEVEL_REQUIRED",
+    "UNVERIFIED",
+    "VARIABLE_FIELDS",
+    "VAR_KEY_RE",
+    "VERIFICATION_STATUSES",
+    "parse_date",
+    "recorded_argv_problems",
+    "safe_load_blueprint_text",
+    "validate_blueprint_data",
 ]
 
 STATE_VERSION = 1
@@ -137,7 +157,7 @@ def utc_now() -> str:
 # --------------------------------------------------------------------------- blueprint resolution
 
 
-def _packaged_blueprints_dir() -> Optional[Path]:
+def _packaged_blueprints_dir() -> Path | None:
     try:
         candidate = resources.files("doogle") / "blueprints"
     except (ModuleNotFoundError, TypeError):  # pragma: no cover - defensive
@@ -146,13 +166,13 @@ def _packaged_blueprints_dir() -> Optional[Path]:
     return path if path.is_dir() else None
 
 
-def _checkout_blueprints_dir() -> Optional[Path]:
+def _checkout_blueprints_dir() -> Path | None:
     path = Path(__file__).resolve().parents[2] / "blueprints"
     return path if path.is_dir() else None
 
 
-def resolve_blueprints_dir(explicit: Optional[str | os.PathLike] = None,
-                           env: Optional[Mapping[str, str]] = None) -> tuple[Path, str]:
+def resolve_blueprints_dir(explicit: str | os.PathLike[str] | None = None,
+                           env: Mapping[str, str] | None = None) -> tuple[Path, str]:
     """Return ``(path, source)``.
 
     Order: ``--blueprints-dir`` > ``$DOOGLE_BLUEPRINTS_DIR`` > packaged data
@@ -190,11 +210,11 @@ def resolve_blueprints_dir(explicit: Optional[str | os.PathLike] = None,
 class Variable:
     key: str
     prompt: str
-    default: Optional[str] = None
-    pattern: Optional[str] = None
-    example: Optional[str] = None
+    default: str | None = None
+    pattern: str | None = None
+    example: str | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
@@ -202,17 +222,17 @@ class Variable:
 class Step:
     id: str
     description: str
-    command: Optional[str] = None
+    command: str | None = None
     risk: str = "low"
     public_exposure: bool = False
-    verify_command: Optional[str] = None
-    verify_expect: Optional[str] = None
+    verify_command: str | None = None
+    verify_expect: str | None = None
     manual: bool = False
     timeout_seconds: int = 1800
-    skip_if: Optional[str] = None
-    skip_if_expect: Optional[str] = None
+    skip_if: str | None = None
+    skip_if_expect: str | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return dict(self.__dict__)
 
 
@@ -220,12 +240,12 @@ class Step:
 class TeardownStep:
     id: str
     description: str
-    command: Optional[str] = None
+    command: str | None = None
     risk: str = "high"
     manual: bool = False
     undoes: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return dict(self.__dict__)
 
 
@@ -237,7 +257,7 @@ class Blueprint:
     tagline: str
     when_to_use: list[str]
     when_not_to_use: list[str]
-    services: list[dict]
+    services: list[dict[str, Any]]
     estimated_cost: str
     variables: list[Variable]
     steps: list[Step]
@@ -245,16 +265,16 @@ class Blueprint:
     maintainer: str = ""
     last_verified: str = ""
     verification_status: str = "simulated"
-    verified_versions: dict = field(default_factory=dict)
+    verified_versions: dict[str, Any] = field(default_factory=dict)
     verification_notes: str = ""
     keywords: list[str] = field(default_factory=list)
     requires_tools: list[str] = field(default_factory=list)
     prerequisites: list[str] = field(default_factory=list)
     docs: list[str] = field(default_factory=list)
-    path: Optional[Path] = None
+    path: Path | None = None
 
     @property
-    def guide_path(self) -> Optional[Path]:
+    def guide_path(self) -> Path | None:
         if self.path is None:
             return None
         guide = self.path / "GUIDE.md"
@@ -272,7 +292,7 @@ class Blueprint:
                     tools.add(toks[0])
         return sorted(tools)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
             "id": self.id,
@@ -297,7 +317,7 @@ class Blueprint:
         }
 
 
-def freshness(bp: "Blueprint", today: Optional[date] = None, stale_days: int = STALE_AFTER_DAYS) -> dict:
+def freshness(bp: Blueprint, today: date | None = None, stale_days: int = STALE_AFTER_DAYS) -> dict[str, Any]:
     """How recently a blueprint's commands were checked, and how."""
     today = today or date.today()
     verified = parse_date(bp.last_verified)
@@ -313,7 +333,11 @@ def freshness(bp: "Blueprint", today: Optional[date] = None, stale_days: int = S
     }
 
 
-def blueprint_from_data(data: dict, path: Optional[Path] = None) -> Blueprint:
+def _iso(d: date | None) -> str:
+    return d.isoformat() if d else ""
+
+
+def blueprint_from_data(data: dict[str, Any], path: Path | None = None) -> Blueprint:
     return Blueprint(
         id=data["id"],
         name=data["name"].strip(),
@@ -338,7 +362,7 @@ def blueprint_from_data(data: dict, path: Optional[Path] = None) -> Blueprint:
                                undoes=list(t.get("undoes") or []))
                   for t in data["teardown"]],
         maintainer=str(data["maintainer"]).strip(),
-        last_verified=parse_date(data["last_verified"]).isoformat(),
+        last_verified=_iso(parse_date(data["last_verified"])),
         verification_status=data["verification_status"],
         verified_versions={str(k): str(v) for k, v in data["verified_versions"].items()},
         verification_notes=str(data.get("verification_notes") or "").strip(),
@@ -389,7 +413,7 @@ class Catalog:
         for folder in sorted(p for p in self.root.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
             try:
                 bp = load_blueprint_file(folder)
-            except BlueprintValidationError as exc:
+            except BlueprintValidationError as exc:  # noqa: PERF203 - one entry per folder
                 self.errors[folder.name] = exc.errors
             except BlueprintNotFound as exc:
                 self.errors[folder.name] = [str(exc)]
@@ -397,7 +421,7 @@ class Catalog:
                 self.blueprints[bp.id] = bp
 
     @classmethod
-    def load(cls, explicit: Optional[str] = None) -> "Catalog":
+    def load(cls, explicit: str | None = None) -> Catalog:
         root, source = resolve_blueprints_dir(explicit)
         return cls(root, source)
 
@@ -409,7 +433,7 @@ class Catalog:
         known = ", ".join(sorted(self.blueprints)) or "(none)"
         raise BlueprintNotFound(f"unknown blueprint '{bp_id}'. Available: {known}")
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Blueprint]:
         return iter(self.blueprints.values())
 
 
@@ -425,8 +449,8 @@ def check_value(var: Variable, value: str) -> None:
         raise VariableError(f"variable '{var.key}' is {len(value)} characters long (max {MAX_VALUE_LENGTH})")
     bad = sorted({f"U+{ord(c):04X}" for c in value if unicodedata.category(c) in FORBIDDEN_VALUE_CATEGORIES})
     if bad:
-        raise VariableError(f"variable '{var.key}' contains control characters, newlines or invisible/bidi characters ({', '.join(bad[:5])}); "
-                            "these could hide what a command really does")
+        raise VariableError(f"variable '{var.key}' contains control characters, newlines or invisible/bidi "
+                            f"characters ({', '.join(bad[:5])}); these could hide what a command really does")
     if value != value.strip():
         raise VariableError(f"variable '{var.key}' has leading or trailing whitespace")
     if value.startswith("-"):
@@ -438,7 +462,8 @@ def check_value(var: Variable, value: str) -> None:
         raise VariableError(f"variable '{var.key}'='{value}' does not match required pattern {var.pattern}{hint}")
 
 
-def resolve_variables(bp: Blueprint, provided: Optional[Mapping[str, Any]] = None) -> tuple[dict[str, str], list[Variable]]:
+def resolve_variables(bp: Blueprint,
+                      provided: Mapping[str, Any] | None = None) -> tuple[dict[str, str], list[Variable]]:
     """Merge provided values with defaults. Returns (values, missing)."""
     provided = dict(provided or {})
     unknown = set(provided) - {v.key for v in bp.variables}
@@ -467,7 +492,7 @@ def render_argv(template: str, values: Mapping[str, str]) -> list[str]:
     """
     argv = []
     for token in shlex.split(template):
-        def sub(match: re.Match) -> str:
+        def sub(match: re.Match[str]) -> str:
             key = match.group(1)
             if key not in values:
                 raise VariableError(f"unresolved placeholder '{{{{{key}}}}}' in: {template}")
@@ -481,7 +506,7 @@ def render_argv(template: str, values: Mapping[str, str]) -> list[str]:
 
 
 def render_text(template: str, values: Mapping[str, str]) -> str:
-    def sub(match: re.Match) -> str:
+    def sub(match: re.Match[str]) -> str:
         key = match.group(1)
         if key not in values:
             raise VariableError(f"unresolved placeholder '{{{{{key}}}}}' in: {template}")
@@ -508,22 +533,22 @@ class PlannedStep:
     risk: str
     public_exposure: bool
     manual: bool
-    argv: Optional[list[str]]
-    verify_argv: Optional[list[str]]
-    verify_expect: Optional[str]
+    argv: list[str] | None
+    verify_argv: list[str] | None
+    verify_expect: str | None
     timeout_seconds: int = 1800
-    skip_argv: Optional[list[str]] = None
-    skip_if_expect: Optional[str] = None
+    skip_argv: list[str] | None = None
+    skip_if_expect: str | None = None
 
     @property
-    def command(self) -> Optional[str]:
+    def command(self) -> str | None:
         return display(self.argv) if self.argv else None
 
     @property
-    def verify_command(self) -> Optional[str]:
+    def verify_command(self) -> str | None:
         return display(self.verify_argv) if self.verify_argv else None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "index": self.index, "id": self.id, "description": self.description, "risk": self.risk,
             "public_exposure": self.public_exposure, "manual": self.manual, "command": self.command,
@@ -540,14 +565,14 @@ class PlannedTeardown:
     description: str
     risk: str
     manual: bool
-    argv: Optional[list[str]]
+    argv: list[str] | None
     undoes: list[str] = field(default_factory=list)
 
     @property
-    def command(self) -> Optional[str]:
+    def command(self) -> str | None:
         return display(self.argv) if self.argv else None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {"id": self.id, "description": self.description, "risk": self.risk, "manual": self.manual,
                 "command": self.command, "argv": self.argv, "undoes": list(self.undoes)}
 
@@ -558,7 +583,7 @@ class Plan:
     variables: dict[str, str]
     steps: list[PlannedStep]
     teardown: list[PlannedTeardown]
-    tools: dict[str, Optional[str]]
+    tools: dict[str, str | None]
 
     @property
     def high_risk_steps(self) -> list[str]:
@@ -587,7 +612,7 @@ class Plan:
         out.append("cost: " + self.blueprint.estimated_cost)
         return out
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "blueprint_id": self.blueprint.id,
             "name": self.blueprint.name,
@@ -608,13 +633,13 @@ class Plan:
         }
 
 
-def check_tools(tools: Iterable[str], which: Optional[Callable[[str], Optional[str]]] = None) -> dict[str, Optional[str]]:
+def check_tools(tools: Iterable[str], which: Callable[[str], str | None] | None = None) -> dict[str, str | None]:
     which = which or shutil.which
     return {t: which(t) for t in sorted(set(tools))}
 
 
-def build_plan(bp: Blueprint, provided: Optional[Mapping[str, Any]] = None,
-               which: Optional[Callable[[str], Optional[str]]] = None) -> Plan:
+def build_plan(bp: Blueprint, provided: Mapping[str, Any] | None = None,
+               which: Callable[[str], str | None] | None = None) -> Plan:
     """Pure dry-run plan. Never mutates anything."""
     values, missing = resolve_variables(bp, provided)
     if missing:
@@ -644,7 +669,7 @@ def build_plan(bp: Blueprint, provided: Optional[Mapping[str, Any]] = None,
 # --------------------------------------------------------------------------- state
 
 
-def resolve_state_path(state_dir: Optional[str | os.PathLike] = None) -> Path:
+def resolve_state_path(state_dir: str | os.PathLike[str] | None = None) -> Path:
     base = state_dir or os.environ.get(STATE_DIR_ENV) or (Path.cwd() / ".doogle")
     return Path(base).expanduser() / "state.json"
 
@@ -727,7 +752,7 @@ class StateStore:
                 _unlock_fd(fd)
             os.close(fd)
 
-    def load(self) -> dict:
+    def load(self) -> dict[str, Any]:
         if not self.path.exists():
             return {"state_version": STATE_VERSION, "runs": []}
         hint = (f"; a previous copy is at '{self.backup_path}'" if self.backup_path.exists() else "")
@@ -748,7 +773,7 @@ class StateStore:
             _check_run_shape(run, f"state file '{self.path}': runs[{i}]")
         return data
 
-    def _write(self, data: dict) -> None:
+    def _write(self, data: dict[str, Any]) -> None:
         self._ensure_dir()
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".state.", suffix=".tmp")
         try:
@@ -768,11 +793,11 @@ class StateStore:
             if os.path.exists(tmp):
                 os.unlink(tmp)
 
-    def runs(self) -> list[dict]:
-        runs: list[dict] = self.load()["runs"]
+    def runs(self) -> list[dict[str, Any]]:
+        runs: list[dict[str, Any]] = self.load()["runs"]
         return runs
 
-    def get(self, run_id: str) -> dict:
+    def get(self, run_id: str) -> dict[str, Any]:
         runs = self.runs()
         if not runs:
             raise StateError(f"no runs recorded in '{self.path}' (runs are recorded by 'doogle plan <id> --apply')")
@@ -785,7 +810,7 @@ class StateStore:
             raise StateError(f"no run '{run_id}' in '{self.path}' (see: doogle history)")
         raise StateError(f"run id prefix '{run_id}' is ambiguous ({len(matches)} runs match; use more characters)")
 
-    def save_run(self, run: dict) -> None:
+    def save_run(self, run: dict[str, Any]) -> None:
         _check_run_shape(run, "run record")
         with self._locked():
             data = self.load()
@@ -814,7 +839,7 @@ class CommandResult:
 def subprocess_runner(argv: Sequence[str], timeout: int) -> CommandResult:
     """Run argv without a shell (never ``shell=True``); capture output as UTF-8 with replacement."""
     try:
-        proc = subprocess.run(list(argv), capture_output=True, text=True, encoding="utf-8",  # noqa: S603
+        proc = subprocess.run(list(argv), capture_output=True, text=True, encoding="utf-8",
                               errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, check=False)
     except FileNotFoundError:
         return CommandResult(127, "", f"command not found: {argv[0]}")
@@ -863,7 +888,7 @@ def _output(result: CommandResult, lines: int = 15) -> str:
     return _tail(result.stdout + ("\n" + result.stderr if result.stderr else ""), lines)
 
 
-def new_run_record(plan: Plan, mode: str = "apply") -> dict:
+def new_run_record(plan: Plan, mode: str = "apply") -> dict[str, Any]:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return {
         "run_id": f"{stamp}-{plan.blueprint.id}-{secrets.token_hex(3)}",
@@ -899,10 +924,10 @@ class Gates:
 
     yes: bool = False
     approve_high_risk: bool = False
-    confirm: Optional[Callable[[str], bool]] = None
+    confirm: Callable[[str], bool] | None = None
 
 
-def enforce_gates(*, tools: Mapping[str, Optional[str]], high_risk: Sequence[str], gates: Gates,
+def enforce_gates(*, tools: Mapping[str, str | None], high_risk: Sequence[str], gates: Gates,
                   summary: str, what: str = "apply") -> None:
     missing = [t for t, p in tools.items() if p is None]
     if missing:
@@ -924,7 +949,7 @@ def enforce_gates(*, tools: Mapping[str, Optional[str]], high_risk: Sequence[str
 TOUCHED_STATUSES = {"succeeded", "failed", "verify_failed", "running", "interrupted"}
 
 
-def teardown_preview(run: dict) -> list[dict]:
+def teardown_preview(run: dict[str, Any]) -> list[dict[str, Any]]:
     """Decide, per recorded teardown entry, whether it would run and why.
 
     An entry that declares ``undoes: [step ids]`` only runs if at least one of those steps was
@@ -956,25 +981,25 @@ def teardown_preview(run: dict) -> list[dict]:
 class Executor:
     """Runs a plan step by step, persisting state after every transition."""
 
-    def __init__(self, store: StateStore, runner: Optional[Runner] = None,
-                 on_event: Optional[Callable[[str, dict], None]] = None,
-                 confirm_manual: Optional[Callable[[dict], bool]] = None):
+    def __init__(self, store: StateStore, runner: Runner | None = None,
+                 on_event: Callable[[str, dict[str, Any]], None] | None = None,
+                 confirm_manual: Callable[[dict[str, Any]], bool] | None = None):
         self.store = store
         self.runner: Runner = runner or subprocess_runner
         self.on_event = on_event or (lambda kind, payload: None)
         self.confirm_manual = confirm_manual
 
-    def _emit(self, kind: str, payload: dict) -> None:
+    def _emit(self, kind: str, payload: dict[str, Any]) -> None:
         self.on_event(kind, payload)
 
-    def apply(self, plan: Plan, gates: Gates) -> dict:
+    def apply(self, plan: Plan, gates: Gates) -> dict[str, Any]:
         enforce_gates(tools=plan.tools, high_risk=plan.high_risk_steps, gates=gates,
                       summary=f"Apply blueprint '{plan.blueprint.id}' ({len(plan.steps)} steps)?")
         run = new_run_record(plan)
         self.store.save_run(run)
         return self._execute(run, assume_manual_done=set())
 
-    def resume(self, run: dict, plan: Plan, gates: Gates) -> dict:
+    def resume(self, run: dict[str, Any], plan: Plan, gates: Gates) -> dict[str, Any]:
         _check_run_shape(run, "run")
         if run.get("status") == "succeeded":
             raise StateError(f"run {run['run_id']} already succeeded; nothing to resume")
@@ -985,7 +1010,7 @@ class Executor:
             raise StateError("the blueprint's steps changed since this run was recorded; start a new run")
         # Never execute commands read back from disk: re-render them from the blueprint and the
         # recorded variables, and refuse if what is on disk differs (edited state or changed blueprint).
-        for rec, planned in zip(run["steps"], plan.steps):
+        for rec, planned in zip(run["steps"], plan.steps, strict=True):
             fresh = {"argv": planned.argv, "verify_argv": planned.verify_argv, "skip_argv": planned.skip_argv}
             if rec.get("status") != "succeeded" and any(rec.get(k) != v for k, v in fresh.items()):
                 raise StateError(f"step '{rec['id']}' recorded in run {run['run_id']} no longer matches the "
@@ -1005,7 +1030,7 @@ class Executor:
         self.store.save_run(run)
         return self._execute(run, assume_manual_done=paused_manual)
 
-    def _finish(self, run: dict, status: str) -> dict:
+    def _finish(self, run: dict[str, Any], status: str) -> dict[str, Any]:
         run["status"] = status
         run["finished_at"] = utc_now()
         for s in run["steps"]:
@@ -1015,8 +1040,8 @@ class Executor:
         self._emit("run_finished", run)
         return run
 
-    def _execute(self, run: dict, assume_manual_done: set[str]) -> dict:
-        current: Optional[dict] = None
+    def _execute(self, run: dict[str, Any], assume_manual_done: set[str]) -> dict[str, Any]:
+        current: dict[str, Any] | None = None
         try:
             for step in run["steps"]:
                 if step["status"] == "succeeded":
@@ -1037,7 +1062,8 @@ class Executor:
             self._emit("run_finished", run)
             raise
 
-    def _run_step(self, run: dict, step: dict, assume_manual_done: set[str]) -> Optional[dict]:
+    def _run_step(self, run: dict[str, Any], step: dict[str, Any],
+                  assume_manual_done: set[str]) -> dict[str, Any] | None:
         """Execute one step. Returns the finished run if the run stops here, else None."""
         step["status"] = "running"
         step["started_at"] = utc_now()
@@ -1093,9 +1119,9 @@ class Executor:
         self._emit("step_finished", step)
         return None
 
-    def teardown(self, run: dict, gates: Gates, tools: Optional[Mapping[str, Optional[str]]] = None,
-                 which: Optional[Callable[[str], Optional[str]]] = None,
-                 expected: Optional[Sequence[PlannedTeardown]] = None) -> dict:
+    def teardown(self, run: dict[str, Any], gates: Gates, tools: Mapping[str, str | None] | None = None,
+                 which: Callable[[str], str | None] | None = None,
+                 expected: Sequence[PlannedTeardown] | None = None) -> dict[str, Any]:
         """Run the recorded teardown. ``expected`` (re-rendered from the current blueprint) is
         compared with what is on disk; differences are reported as warnings."""
         _check_run_shape(run, "run")
@@ -1120,7 +1146,7 @@ class Executor:
                       summary=f"Tear down run {run['run_id']} ({len(automated)} commands)?", what="teardown")
         run["teardown_warnings"] = warnings
         failures = 0
-        current: Optional[dict] = None
+        current: dict[str, Any] | None = None
         try:
             for t in entries:
                 if not t.get("argv"):
@@ -1165,7 +1191,7 @@ class Executor:
 STOPWORDS = set("""a an and are as at be but by can do for from get have i if in into is it its just me my
 need of on or our so some that the their them then there this to too up use using want we what when which
 who will with without would you your like make build set setup something thing things very really how now
-please help any all should could""".split())
+please help any all should could""".split())  # noqa: SIM905
 
 SYNONYMS = {
     "cheap": ["cost", "free", "budget", "scale-to-zero"],
@@ -1244,7 +1270,7 @@ def _phrase_in(phrase: str, text: str) -> bool:
     return re.search(r"(?<![a-z0-9-])" + re.escape(phrase) + r"(?![a-z0-9-])", text) is not None
 
 
-def route_offline(goal: str, blueprints: Iterable[Blueprint], top: int = 3) -> dict:
+def route_offline(goal: str, blueprints: Iterable[Blueprint], top: int = 3) -> dict[str, Any]:
     """Deterministic keyword/heuristic routing. No network.
 
     Scoring per blueprint: a specific keyword found in the goal = 3, a generic one = 1.5, a keyword
@@ -1266,7 +1292,7 @@ def route_offline(goal: str, blueprints: Iterable[Blueprint], top: int = 3) -> d
     single_tokens = raw_tokens - consumed
     goal_tokens = _expand(raw_tokens)
     out_of_scope = sorted(raw_tokens & OUT_OF_SCOPE)
-    results = []
+    results: list[dict[str, Any]] = []
     for bp in blueprints:
         score = 0.0
         synonym_score = 0.0
@@ -1331,7 +1357,7 @@ class AIUnavailable(DoogleError):
     pass
 
 
-def ai_key_present(env: Optional[Mapping[str, str]] = None) -> Optional[str]:
+def ai_key_present(env: Mapping[str, str] | None = None) -> str | None:
     env = os.environ if env is None else env
     for name in AI_KEY_ENVS:
         if env.get(name):
@@ -1339,8 +1365,8 @@ def ai_key_present(env: Optional[Mapping[str, str]] = None) -> Optional[str]:
     return None
 
 
-def route_ai(goal: str, blueprints: Sequence[Blueprint], offline: dict,
-             env: Optional[Mapping[str, str]] = None) -> dict:
+def route_ai(goal: str, blueprints: Sequence[Blueprint], offline: dict[str, Any],
+             env: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Ask Gemini (via google-genai) to pick a blueprint. Advisory only: the
     answer must name a catalogued blueprint or it is discarded."""
     env = os.environ if env is None else env
@@ -1348,7 +1374,7 @@ def route_ai(goal: str, blueprints: Sequence[Blueprint], offline: dict,
     if not key_name:
         raise AIUnavailable(f"no API key set ({' or '.join(AI_KEY_ENVS)})")
     try:
-        from google import genai  # type: ignore
+        from google import genai
     except ImportError as exc:
         raise AIUnavailable("google-genai is not installed; run: pip install 'doogle[ai]'") from exc
     catalog = [{"id": b.id, "tagline": b.tagline, "when_to_use": b.when_to_use,
@@ -1384,7 +1410,7 @@ def route_ai(goal: str, blueprints: Sequence[Blueprint], offline: dict,
 
 
 def route(goal: str, catalog: Catalog, use_ai: bool = False, top: int = 3,
-          env: Optional[Mapping[str, str]] = None) -> dict:
+          env: Mapping[str, str] | None = None) -> dict[str, Any]:
     if not goal or not goal.strip():
         raise DoogleError("describe your goal, e.g. doogle ask \"a cheap API for my side project\"")
     bps = list(catalog)
@@ -1401,10 +1427,10 @@ def route(goal: str, catalog: Catalog, use_ai: bool = False, top: int = 3,
 # --------------------------------------------------------------------------- doctor
 
 
-def _local_cmd(argv: Sequence[str], timeout: int = 15) -> Optional[str]:
+def _local_cmd(argv: Sequence[str], timeout: int = 15) -> str | None:
     try:
-        proc = subprocess.run(list(argv), capture_output=True, text=True, timeout=timeout,
-                              stdin=subprocess.DEVNULL)
+        proc = subprocess.run(list(argv), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=timeout, stdin=subprocess.DEVNULL, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if proc.returncode != 0:
@@ -1412,17 +1438,17 @@ def _local_cmd(argv: Sequence[str], timeout: int = 15) -> Optional[str]:
     return (proc.stdout or "").strip()
 
 
-def doctor(blueprints_dir: Optional[str] = None, state_dir: Optional[str] = None,
-           which: Optional[Callable[[str], Optional[str]]] = None,
-           run_local: Optional[Callable[[Sequence[str]], Optional[str]]] = None,
-           env: Optional[Mapping[str, str]] = None) -> dict:
+def doctor(blueprints_dir: str | None = None, state_dir: str | None = None,
+           which: Callable[[str], str | None] | None = None,
+           run_local: Callable[[Sequence[str]], str | None] | None = None,
+           env: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Read-only environment diagnostics. Never touches cloud state or the network."""
     env = os.environ if env is None else env
     which = which or shutil.which
     run_local = run_local or _local_cmd
-    checks: list[dict] = []
+    checks: list[dict[str, Any]] = []
 
-    def add(name: str, status: str, detail: str, hint: Optional[str] = None) -> None:
+    def add(name: str, status: str, detail: str, hint: str | None = None) -> None:
         item = {"name": name, "status": status, "detail": detail}
         if hint:
             item["hint"] = hint
@@ -1487,7 +1513,7 @@ def doctor(blueprints_dir: Optional[str] = None, state_dir: Optional[str] = None
 
     key_name = ai_key_present(env)
     try:
-        import google.genai  # type: ignore  # noqa: F401
+        import google.genai  # noqa: F401
         genai_ok = True
     except ImportError:
         genai_ok = False

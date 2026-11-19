@@ -9,8 +9,9 @@ run in CI and fail when someone edits a blueprint without regenerating docs.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
+from typing import Any
 from urllib.parse import quote
 
 from .engine import Blueprint, Catalog
@@ -133,7 +134,7 @@ def _shields(text: str) -> str:
     return quote(text.replace("-", "--").replace("_", "__"), safe="")
 
 
-def share_snippet(bp: Blueprint, url: str) -> dict:
+def share_snippet(bp: Blueprint, url: str) -> dict[str, Any]:
     link = f"{url}/tree/main/blueprints/{bp.id}"
     badge = f"https://img.shields.io/badge/{_shields('built with')}-{_shields('doogle: ' + bp.id)}-{BADGE_COLOR}"
     badge_md = f"[![Built with a Doogle blueprint: {bp.id}]({badge})]({link})"

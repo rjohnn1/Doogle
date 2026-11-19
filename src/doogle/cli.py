@@ -1,6 +1,6 @@
 """Doogle command-line interface.
 
-Commands: list, explain, plan (dry-run; --apply to execute), resume, teardown,
+Commands: list[Any], explain, plan (dry-run; --apply to execute), resume, teardown,
 history, ask, doctor, validate. ``--json`` gives machine-readable output on
 list / explain / plan / ask / doctor / history / validate / teardown.
 
@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any
 
 import yaml
 
@@ -49,7 +51,7 @@ def _interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _confirm_factory(expected: str):
+def _confirm_factory(expected: str) -> Callable[[str], bool]:
     def confirm(summary: str) -> bool:
         sys.stderr.write(f"\n{summary}\nType '{expected}' to continue (anything else aborts): ")
         sys.stderr.flush()
@@ -60,7 +62,7 @@ def _confirm_factory(expected: str):
     return confirm
 
 
-def _confirm_manual(step: dict) -> bool:
+def _confirm_manual(step: dict[str, Any]) -> bool:
     sys.stderr.write(f"\nMANUAL STEP '{step['id']}':\n  {step['description']}\n"
                      "Type 'done' when finished, or press Enter to pause the run: ")
     sys.stderr.flush()
@@ -70,8 +72,8 @@ def _confirm_manual(step: dict) -> bool:
         return False
 
 
-def _parse_vars(pairs: Sequence[str], vars_file: Optional[str]) -> dict:
-    values: dict = {}
+def _parse_vars(pairs: Sequence[str], vars_file: str | None) -> dict[str, Any]:
+    values: dict[str, Any] = {}
     if vars_file:
         path = Path(vars_file)
         if not path.is_file():
@@ -89,7 +91,7 @@ def _parse_vars(pairs: Sequence[str], vars_file: Optional[str]) -> dict:
     return values
 
 
-def _prompt_missing(bp: E.Blueprint, values: dict) -> dict:
+def _prompt_missing(bp: E.Blueprint, values: dict[str, Any]) -> dict[str, Any]:
     _, missing = E.resolve_variables(bp, values)
     for var in missing:
         hint = f" (e.g. {var.example})" if var.example else ""
@@ -145,7 +147,7 @@ def _print_plan(out: Out, plan: E.Plan) -> None:
         out.line(f"  ! {w}")
 
 
-def _print_run(out: Out, run: dict) -> None:
+def _print_run(out: Out, run: dict[str, Any]) -> None:
     out.line(f"\nRun {run['run_id']}: {run['status'].upper()}")
     for s in run["steps"]:
         extra = f" (exit {s['exit_code']})" if s.get("exit_code") not in (None, 0) else ""
@@ -166,8 +168,8 @@ def _print_run(out: Out, run: dict) -> None:
         out.line(f"\nClean up later with: doogle teardown {run['run_id']}")
 
 
-def _event_printer(out: Out):
-    def on_event(kind: str, payload: dict) -> None:
+def _event_printer(out: Out) -> Callable[[str, dict[str, Any]], None]:
+    def on_event(kind: str, payload: dict[str, Any]) -> None:
         if out.as_json:
             return
         if kind == "step_started":
@@ -183,7 +185,7 @@ def _event_printer(out: Out):
     return on_event
 
 
-def _gates(args, expected: str, out: Out) -> E.Gates:
+def _gates(args: argparse.Namespace, expected: str, out: Out) -> E.Gates:
     confirm = None
     if not args.yes and not out.as_json and _interactive():
         confirm = _confirm_factory(expected)
@@ -193,15 +195,15 @@ def _gates(args, expected: str, out: Out) -> E.Gates:
 # --------------------------------------------------------------------------- commands
 
 
-def _fresh_label(f: dict) -> str:
+def _fresh_label(f: dict[str, Any]) -> str:
     age = "never" if f["age_days"] is None else f"{f['age_days']}d ago"
     flag = "  STALE" if f["stale"] else ""
     return f"{f['verification_status']}, {f['last_verified']} ({age}){flag}"
 
 
-def cmd_list(args, out: Out) -> int:
+def cmd_list(args: argparse.Namespace, out: Out) -> int:
     cat = E.Catalog.load(args.blueprints_dir)
-    items = []
+    items: list[dict[str, Any]] = []
     for b in cat:
         if args.category and b.category.lower() != args.category.lower():
             continue
@@ -232,7 +234,7 @@ def cmd_list(args, out: Out) -> int:
     return 0 if not cat.errors else 2
 
 
-def cmd_explain(args, out: Out) -> int:
+def cmd_explain(args: argparse.Namespace, out: Out) -> int:
     cat = E.Catalog.load(args.blueprints_dir)
     bp = cat.get(args.blueprint)
     if out.as_json:
@@ -283,7 +285,7 @@ def cmd_explain(args, out: Out) -> int:
     return 0
 
 
-def cmd_plan(args, out: Out) -> int:
+def cmd_plan(args: argparse.Namespace, out: Out) -> int:
     cat = E.Catalog.load(args.blueprints_dir)
     bp = cat.get(args.blueprint)
     values = _parse_vars(args.var, args.vars_file)
@@ -297,7 +299,7 @@ def cmd_plan(args, out: Out) -> int:
             _print_plan(out, plan)
             hr = " --approve-high-risk" if plan.high_risk_steps else ""
             out.line(f"\nTo execute: doogle plan {bp.id} " + " ".join(
-                f"--var {k}={E.shlex.quote(v)}" for k, v in plan.variables.items()) + f" --apply{hr}")
+                f"--var {k}={shlex.quote(v)}" for k, v in plan.variables.items()) + f" --apply{hr}")
         return 0
     if not out.as_json:
         _print_plan(out, plan)
@@ -312,7 +314,7 @@ def cmd_plan(args, out: Out) -> int:
     return 0 if run["status"] in ("succeeded", "paused") else 1
 
 
-def cmd_resume(args, out: Out) -> int:
+def cmd_resume(args: argparse.Namespace, out: Out) -> int:
     store = E.StateStore(E.resolve_state_path(args.state_dir))
     run = store.get(args.run_id)
     cat = E.Catalog.load(args.blueprints_dir)
@@ -328,7 +330,7 @@ def cmd_resume(args, out: Out) -> int:
     return 0 if run["status"] in ("succeeded", "paused") else 1
 
 
-def _expected_teardown(args, run: dict) -> Optional[list]:
+def _expected_teardown(args: argparse.Namespace, run: dict[str, Any]) -> list[E.PlannedTeardown] | None:
     """Teardown re-rendered from the current blueprint, or None if that is impossible."""
     try:
         bp = E.Catalog.load(args.blueprints_dir).get(run.get("blueprint_id", ""))
@@ -337,7 +339,7 @@ def _expected_teardown(args, run: dict) -> Optional[list]:
         return None
 
 
-def cmd_teardown(args, out: Out) -> int:
+def cmd_teardown(args: argparse.Namespace, out: Out) -> int:
     store = E.StateStore(E.resolve_state_path(args.state_dir))
     run = store.get(args.run_id)
     preview = {p["id"]: p for p in E.teardown_preview(run)}
@@ -381,7 +383,7 @@ def cmd_teardown(args, out: Out) -> int:
     return 0 if run["teardown_status"] in ("succeeded", "nothing_to_run") else 1
 
 
-def cmd_history(args, out: Out) -> int:
+def cmd_history(args: argparse.Namespace, out: Out) -> int:
     store = E.StateStore(E.resolve_state_path(args.state_dir))
     if args.run_id:
         run = store.get(args.run_id)
@@ -411,7 +413,7 @@ def cmd_history(args, out: Out) -> int:
     return 0
 
 
-def cmd_ask(args, out: Out) -> int:
+def cmd_ask(args: argparse.Namespace, out: Out) -> int:
     cat = E.Catalog.load(args.blueprints_dir)
     goal = " ".join(args.goal)
     result = E.route(goal, cat, use_ai=args.ai, top=args.top)
@@ -456,7 +458,7 @@ def cmd_ask(args, out: Out) -> int:
     return 0
 
 
-def cmd_doctor(args, out: Out) -> int:
+def cmd_doctor(args: argparse.Namespace, out: Out) -> int:
     report = E.doctor(args.blueprints_dir, args.state_dir)
     if out.as_json:
         out.json(report)
@@ -471,7 +473,7 @@ def cmd_doctor(args, out: Out) -> int:
     return 1 if report["status"] == "fail" else 0
 
 
-def cmd_docs(args, out: Out) -> int:
+def cmd_docs(args: argparse.Namespace, out: Out) -> int:
     cat = E.Catalog.load(args.blueprints_dir)
     if cat.errors:
         raise E.BlueprintValidationError(", ".join(cat.errors), [e for es in cat.errors.values() for e in es])
@@ -499,7 +501,7 @@ def cmd_docs(args, out: Out) -> int:
     return 0
 
 
-def cmd_share(args, out: Out) -> int:
+def cmd_share(args: argparse.Namespace, out: Out) -> int:
     cat = E.Catalog.load(args.blueprints_dir)
     bp = cat.get(args.blueprint)
     snippet = D.share_snippet(bp, D.repo_url(args.repo_url))
@@ -512,7 +514,7 @@ def cmd_share(args, out: Out) -> int:
     return 0
 
 
-def cmd_validate(args, out: Out) -> int:
+def cmd_validate(args: argparse.Namespace, out: Out) -> int:
     root, source = E.resolve_blueprints_dir(args.blueprints_dir)
     cat = E.Catalog(root, source)
     if out.as_json:
@@ -620,12 +622,13 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     out = Out(getattr(args, "json", False))
     try:
-        return args.func(args, out)
+        code: int = args.func(args, out)
+        return code
     except E.DoogleError as exc:
         if out.as_json:
             out.json({"error": str(exc), "error_type": type(exc).__name__, "exit_code": exc.exit_code})
