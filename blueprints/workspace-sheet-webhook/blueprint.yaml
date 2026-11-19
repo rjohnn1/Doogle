@@ -1,0 +1,107 @@
+schema_version: 1
+id: workspace-sheet-webhook
+name: Google Sheet + Apps Script Webhook
+category: workspace
+tagline: Turn a new Google Sheet into a webhook receiver with a container-bound Apps Script web app, managed from your terminal with clasp.
+keywords:
+  - sheet
+  - spreadsheet
+  - google sheets
+  - sheets
+  - apps script
+  - webhook
+  - form
+  - automation
+  - no-code
+  - low-code
+  - workspace
+  - google workspace
+  - zapier
+  - log
+  - internal tool
+  - gmail
+when_to_use:
+  - You want form submissions, payment notifications, or IoT pings written straight into a spreadsheet your team already uses.
+  - Low volume automation (a few requests per minute) where a Sheet is the database and UI.
+  - You want to keep code in git and deploy Apps Script from the terminal instead of the browser editor.
+when_not_to_use:
+  - "You only need to collect form answers: Google Forms already writes responses to a Sheet with zero code."
+  - "You need high throughput, strict latency, or concurrent writes: Apps Script has quotas and execution limits; use Cloud Run plus Firestore or BigQuery instead."
+  - "Sensitive data or authenticated callers: an 'Anyone' web app URL is public; add a shared-secret check (GUIDE.md) or use a Cloud Run service with IAM."
+  - "You need workflows across many SaaS tools with no code: Google Workspace Flows / AppSheet Automation or an integration platform may be simpler."
+services:
+  - name: Google Sheets
+    role: Stores each webhook payload as a row and is the UI for your team.
+  - name: Apps Script
+    role: Container-bound script whose doPost(e) handler receives webhook requests.
+  - name: Apps Script web app deployment
+    role: Publishes a versioned HTTPS URL that external services POST to.
+  - name: clasp (Command Line Apps Script Projects)
+    role: Google's open-source CLI that creates, pushes and deploys the script from your terminal.
+estimated_cost: >-
+  No additional charge for consumer Google accounts or Workspace plans; usage is limited by Apps
+  Script quotas (executions, runtime, URL fetch calls) which are lower on consumer accounts than
+  on Workspace accounts. Check the official Apps Script quotas page for current limits.
+prerequisites:
+  - Node.js and clasp installed (npm install -g @google/clasp), then clasp login.
+  - Apps Script API turned on for your account at https://script.google.com/home/usersettings
+  - Run doogle from an empty project folder; clasp writes .clasp.json there.
+docs:
+  - https://github.com/google/clasp
+  - https://developers.google.com/apps-script/guides/web
+  - https://developers.google.com/apps-script/guides/services/quotas
+variables:
+  - key: sheet_title
+    prompt: Title for the new Google Sheet and its script
+    default: Doogle Webhook Inbox
+    pattern: "^[A-Za-z0-9][A-Za-z0-9 _.()-]{0,99}$"
+  - key: root_dir
+    prompt: Local folder for the Apps Script source files
+    default: src
+    pattern: "^[A-Za-z0-9._~/][A-Za-z0-9._~/-]*$"
+  - key: deployment_description
+    prompt: Description for the web app deployment
+    default: doogle webhook v1
+    pattern: "^[A-Za-z0-9][A-Za-z0-9 _.-]{0,99}$"
+steps:
+  - id: show-clasp-account
+    description: Show which Google account clasp is logged in as (read-only). Stop if it is the wrong account.
+    command: clasp show-authorized-user
+    risk: low
+  - id: create-sheet-and-script
+    description: Create a new Google Sheet "{{sheet_title}}" with a bound Apps Script project; files go to {{root_dir}}/.
+    command: clasp create-script --type sheets --title {{sheet_title}} --rootDir {{root_dir}}
+    risk: medium
+    verify_command: test -f .clasp.json
+  - id: add-webhook-code
+    description: >-
+      Copy Code.js and appsscript.json from this blueprint's GUIDE.md into {{root_dir}}/ (replace
+      the generated files), and set the WEBHOOK_TOKEN script property as described in the guide.
+    manual: true
+  - id: push-code
+    description: Upload {{root_dir}}/ to the Apps Script project (replaces the remote files and manifest).
+    command: clasp push --force
+    risk: medium
+  - id: deploy-webapp
+    description: Create a versioned web app deployment "{{deployment_description}}". The URL accepts anonymous POSTs.
+    command: clasp create-deployment --description {{deployment_description}}
+    risk: high
+    public_exposure: true
+    verify_command: clasp list-deployments
+    verify_expect: "{{deployment_description}}"
+  - id: authorize-and-test
+    description: >-
+      Open the Sheet > Extensions > Apps Script, run setup() once to grant permissions, then send
+      the test curl request from GUIDE.md and confirm a row appears.
+    manual: true
+teardown:
+  - id: delete-deployments
+    description: Delete all versioned deployments so the public webhook URL stops working.
+    command: clasp delete-deployment --all
+    risk: high
+  - id: trash-sheet
+    description: Move the "{{sheet_title}}" spreadsheet to Drive trash (this also removes its bound script).
+    manual: true
+  - id: remove-local-config
+    description: Delete the local .clasp.json and {{root_dir}}/ folder if you no longer need them.
+    manual: true

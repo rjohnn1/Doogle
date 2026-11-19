@@ -1,0 +1,99 @@
+schema_version: 1
+id: solo-serverless-api
+name: Solo Serverless API on Cloud Run
+category: compute
+tagline: Ship a containerised HTTP API from source to Cloud Run with scale-to-zero, no Dockerfile required.
+keywords:
+  - api
+  - rest api
+  - cheap
+  - side project
+  - side-project
+  - backend
+  - microservice
+  - container
+  - scale to zero
+  - scale-to-zero
+  - serverless
+  - cloud run
+  - low traffic
+  - http
+  - fastapi
+  - flask
+  - express
+when_to_use:
+  - You have a small HTTP API or backend (any language with a buildpack or a Dockerfile) and traffic is low or spiky.
+  - You want pay-per-use with scale-to-zero instead of an always-on VM.
+  - A side project, prototype, or internal tool that needs a public HTTPS URL quickly.
+when_not_to_use:
+  - "Your site is static (HTML/JS only): Firebase Hosting is simpler and cheaper."
+  - "You only need a few event handlers on Firebase data: Cloud Functions for Firebase is less to manage."
+  - "You need sub-100ms cold starts on every request: scale-to-zero adds cold starts; keep min instances above 0 and accept the always-on cost."
+  - "You need long-lived WebSocket-heavy or stateful workloads: consider GKE Autopilot or a Compute Engine VM."
+  - "The API is for internal use only: drop --allow-unauthenticated and use IAM (see GUIDE.md)."
+services:
+  - name: Cloud Run
+    role: Runs the container, scales from zero, provides the HTTPS URL.
+  - name: Cloud Build
+    role: Builds the container image from your source with Google Cloud buildpacks or your Dockerfile.
+  - name: Artifact Registry
+    role: Stores the built images (repository 'cloud-run-source-deploy' is created automatically).
+estimated_cost: >-
+  Cloud Run, Cloud Build and Artifact Registry each have a free tier that typically covers a
+  low-traffic side project; usage beyond it is billed per request, CPU and memory time, build
+  minutes and stored image size. A billing account must be linked to the project. Check the
+  official Cloud Run pricing page and set a budget alert before going public.
+prerequisites:
+  - A Google Cloud project with billing enabled, and gcloud logged in (gcloud auth login).
+  - Run doogle from (or point source_dir at) a folder containing your app, e.g. a main.py with requirements.txt, a package.json, or a Dockerfile.
+docs:
+  - https://cloud.google.com/run/docs/deploying-source-code
+  - https://cloud.google.com/run/docs/authenticating/public
+  - https://cloud.google.com/run/pricing
+variables:
+  - key: project_id
+    prompt: Google Cloud project ID to deploy into
+    pattern: "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+    example: my-side-project-123
+  - key: region
+    prompt: Cloud Run region
+    default: us-central1
+    pattern: "^[a-z]+-[a-z]+[0-9]+$"
+  - key: service_name
+    prompt: Cloud Run service name
+    default: doogle-api
+    pattern: "^[a-z]([-a-z0-9]{0,47}[a-z0-9])?$"
+  - key: source_dir
+    prompt: Path to the app source folder
+    default: "."
+    pattern: "^[A-Za-z0-9._~/][A-Za-z0-9._~/-]*$"
+steps:
+  - id: check-project
+    description: Confirm the project exists and your gcloud account can see it (read-only).
+    command: gcloud projects describe {{project_id}} '--format=value(projectId)'
+    risk: low
+  - id: enable-apis
+    description: Enable the Cloud Run, Cloud Build and Artifact Registry APIs in {{project_id}}.
+    command: gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com --project {{project_id}}
+    risk: medium
+    verify_command: gcloud services list --enabled --project {{project_id}} '--filter=config.name=run.googleapis.com' '--format=value(config.name)'
+    verify_expect: run.googleapis.com
+  - id: deploy-service
+    description: Build {{source_dir}} and deploy it as {{service_name}} in {{region}}, publicly reachable, scaling 0-3 instances.
+    command: gcloud run deploy {{service_name}} --source {{source_dir}} --region {{region}} --project {{project_id}} --allow-unauthenticated --min-instances 0 --max-instances 3 --quiet
+    risk: high
+    public_exposure: true
+    timeout_seconds: 1800
+    verify_command: gcloud run services describe {{service_name}} --region {{region}} --project {{project_id}} '--format=value(status.url)'
+    verify_expect: "https://"
+teardown:
+  - id: delete-service
+    description: Delete the Cloud Run service {{service_name}} in {{region}}.
+    command: gcloud run services delete {{service_name}} --region {{region}} --project {{project_id}} --quiet
+    risk: high
+  - id: review-images
+    description: >-
+      Built images stay in the Artifact Registry repository 'cloud-run-source-deploy' in {{region}}
+      and are shared by every source deploy in that region. Delete old images in the console
+      (Artifact Registry > cloud-run-source-deploy) only if nothing else uses them.
+    manual: true

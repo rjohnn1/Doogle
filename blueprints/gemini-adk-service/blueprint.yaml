@@ -1,0 +1,137 @@
+schema_version: 1
+id: gemini-adk-service
+name: Gemini ADK Agent Service on Cloud Run + Vertex AI
+category: ai
+tagline: Deploy an Agent Development Kit (ADK) agent backed by Gemini on Vertex AI as a private Cloud Run service with its own least-privilege identity.
+keywords:
+  - agent
+  - ai agent
+  - multi-agent
+  - adk
+  - agent development kit
+  - gemini
+  - vertex ai
+  - vertex
+  - llm
+  - ai
+  - chatbot
+  - assistant
+  - tool calling
+  - function calling
+  - genai
+when_to_use:
+  - You are building an AI agent (tools, multi-step reasoning, sub-agents) with Google ADK and need it hosted as an API.
+  - You want Gemini via Vertex AI with IAM-based auth (no API keys in code) and per-project quotas and logging.
+  - The agent should be private by default and called by your own backend, scheduler, or authenticated users.
+when_not_to_use:
+  - "You only need a single prompt-and-response call: call the Gemini API directly from your app with the google-genai SDK; no agent framework or server needed."
+  - "You are still experimenting with prompts: prototype in Google AI Studio first, then export code."
+  - "You want a fully managed agent runtime with sessions and memory handled for you: evaluate Vertex AI Agent Engine (deploy with 'adk deploy agent_engine')."
+  - "You need a no-code chat agent over your documents: consider Vertex AI Search / Agent Builder style products before writing code."
+services:
+  - name: Vertex AI (Gemini models)
+    role: Serves the Gemini model calls made by the agent, authorised by the service account.
+  - name: Agent Development Kit (ADK)
+    role: Open-source Python framework that defines the agent, its tools, and the FastAPI server.
+  - name: Cloud Run
+    role: Hosts the agent server privately; requests need an identity token.
+  - name: IAM service account
+    role: Dedicated runtime identity granted only roles/aiplatform.user.
+  - name: Cloud Build and Artifact Registry
+    role: Build and store the agent container from your source folder.
+estimated_cost: >-
+  Gemini on Vertex AI is billed per input and output token and varies a lot by model; agents
+  that loop or call tools can use many tokens per request. Cloud Run, Cloud Build and Artifact
+  Registry have free tiers and then bill by usage. There is no free model quota on Vertex AI, so
+  set a billing budget alert and check the official Vertex AI generative AI pricing page.
+prerequisites:
+  - A Google Cloud project with billing enabled, and gcloud logged in (gcloud auth login).
+  - An ADK agent folder containing a Dockerfile (GUIDE.md has a minimal working example). Test locally first with 'adk web'.
+  - Permission to change IAM in the project (roles/resourcemanager.projectIamAdmin or Owner).
+docs:
+  - https://google.github.io/adk-docs/deploy/cloud-run/
+  - https://cloud.google.com/vertex-ai/generative-ai/docs/start/quickstarts/quickstart-multimodal
+  - https://cloud.google.com/run/docs/authenticating/service-to-service
+variables:
+  - key: project_id
+    prompt: Google Cloud project ID
+    pattern: "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+    example: my-agent-project-123
+  - key: region
+    prompt: Cloud Run region
+    default: us-central1
+    pattern: "^[a-z]+-[a-z]+[0-9]+$"
+  - key: vertex_location
+    prompt: Vertex AI location for Gemini calls (a region, or 'global')
+    default: us-central1
+    pattern: "^(global|[a-z]+-[a-z]+[0-9]+)$"
+  - key: service_name
+    prompt: Cloud Run service name for the agent
+    default: doogle-agent
+    pattern: "^[a-z]([-a-z0-9]{0,47}[a-z0-9])?$"
+  - key: service_account_name
+    prompt: Name for the agent's runtime service account (6-30 chars)
+    default: doogle-agent-runtime
+    pattern: "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+  - key: agent_dir
+    prompt: Path to the agent source folder (must contain a Dockerfile)
+    default: "."
+    pattern: "^[A-Za-z0-9._~/][A-Za-z0-9._~/-]*$"
+steps:
+  - id: check-agent-source
+    description: Confirm {{agent_dir}} contains a Dockerfile (local, read-only).
+    command: test -f {{agent_dir}}/Dockerfile
+    risk: low
+  - id: check-project
+    description: Confirm the project exists and your gcloud account can see it (read-only).
+    command: gcloud projects describe {{project_id}} '--format=value(projectId)'
+    risk: low
+  - id: enable-apis
+    description: Enable Vertex AI, Cloud Run, Cloud Build and Artifact Registry APIs.
+    command: gcloud services enable aiplatform.googleapis.com run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com --project {{project_id}}
+    risk: medium
+    verify_command: gcloud services list --enabled --project {{project_id}} '--filter=config.name=aiplatform.googleapis.com' '--format=value(config.name)'
+    verify_expect: aiplatform.googleapis.com
+  - id: create-service-account
+    description: Create the dedicated runtime service account {{service_account_name}}.
+    command: gcloud iam service-accounts create {{service_account_name}} --display-name "Doogle ADK agent runtime" --project {{project_id}}
+    risk: medium
+    verify_command: gcloud iam service-accounts describe {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --project {{project_id}} '--format=value(email)'
+    verify_expect: "{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
+  - id: grant-vertex-user
+    description: Grant only roles/aiplatform.user to the runtime service account (IAM change).
+    command: gcloud projects add-iam-policy-binding {{project_id}} --member serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --role roles/aiplatform.user --condition None
+    risk: high
+    verify_command: gcloud projects get-iam-policy {{project_id}} --flatten bindings[].members --filter bindings.role:roles/aiplatform.user '--format=value(bindings.members)'
+    verify_expect: "serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com"
+  - id: deploy-agent
+    description: Build {{agent_dir}} and deploy it privately as {{service_name}} (no unauthenticated access) using the runtime service account.
+    command: >-
+      gcloud run deploy {{service_name}} --source {{agent_dir}} --region {{region}} --project {{project_id}}
+      --service-account {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com
+      --no-allow-unauthenticated --min-instances 0 --max-instances 2
+      --set-env-vars GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT={{project_id}},GOOGLE_CLOUD_LOCATION={{vertex_location}}
+      --quiet
+    risk: medium
+    timeout_seconds: 1800
+    verify_command: gcloud run services describe {{service_name}} --region {{region}} --project {{project_id}} '--format=value(status.url)'
+    verify_expect: "https://"
+teardown:
+  - id: delete-service
+    description: Delete the Cloud Run service {{service_name}}.
+    command: gcloud run services delete {{service_name}} --region {{region}} --project {{project_id}} --quiet
+    risk: high
+  - id: remove-vertex-binding
+    description: Remove the roles/aiplatform.user binding from the runtime service account.
+    command: gcloud projects remove-iam-policy-binding {{project_id}} --member serviceAccount:{{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --role roles/aiplatform.user --condition None
+    risk: high
+  - id: delete-service-account
+    description: Delete the runtime service account {{service_account_name}}.
+    command: gcloud iam service-accounts delete {{service_account_name}}@{{project_id}}.iam.gserviceaccount.com --project {{project_id}} --quiet
+    risk: high
+  - id: review-images
+    description: >-
+      Built images remain in Artifact Registry repository 'cloud-run-source-deploy' in {{region}}.
+      Delete them in the console if nothing else uses them. APIs stay enabled; disabling them is
+      optional and can break other workloads in the project.
+    manual: true

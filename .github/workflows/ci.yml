@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Unit tests
+        run: pytest -v
+      - name: Blueprint schema & integrity
+        run: doogle validate
+      - name: CLI smoke checks (no cloud tools needed)
+        run: |
+          doogle --help
+          doogle list --json
+          doogle explain solo-serverless-api --json
+          doogle plan solo-serverless-api --var project_id=ci-demo-project --json
+          doogle ask "I want a cheap API for my side project" --json
+          doogle doctor --json
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+      - name: Installed wheel finds bundled blueprints from another directory
+        run: |
+          python -m venv /tmp/wheel-env
+          /tmp/wheel-env/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/wheel-env/bin/doogle validate
+          /tmp/wheel-env/bin/doogle list --json
