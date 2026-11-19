@@ -95,7 +95,10 @@ def _prompt_missing(bp: E.Blueprint, values: dict) -> dict:
         hint = f" (e.g. {var.example})" if var.example else ""
         sys.stderr.write(f"{var.prompt}{hint}: ")
         sys.stderr.flush()
-        values[var.key] = input().strip()
+        try:
+            values[var.key] = input().strip()
+        except EOFError:
+            raise E.VariableError(f"no value given for '{var.key}'; pass --var {var.key}=...") from None
     return values
 
 
@@ -156,7 +159,7 @@ def _print_run(out: Out, run: dict) -> None:
                                       for s in run["steps"]) else ""
     if run["status"] == "paused":
         out.line(f"\nPaused at a manual step. When it is done: doogle resume {run['run_id']}{hr}")
-    elif run["status"] == "failed":
+    elif run["status"] in ("failed", "interrupted"):
         out.line(f"\nFix the cause, then: doogle resume {run['run_id']}{hr}  "
                  f"(or clean up with: doogle teardown {run['run_id']})")
     else:
@@ -175,6 +178,8 @@ def _event_printer(out: Out):
             out.err(f"-> teardown {payload['id']}: {payload['command']}")
         elif kind == "teardown_finished":
             out.err(f"   {payload['status']}")
+        elif kind == "teardown_skipped":
+            out.err(f"-> teardown {payload['id']}: skipped, {payload.get('skip_reason')}")
     return on_event
 
 
@@ -323,33 +328,57 @@ def cmd_resume(args, out: Out) -> int:
     return 0 if run["status"] in ("succeeded", "paused") else 1
 
 
+def _expected_teardown(args, run: dict) -> Optional[list]:
+    """Teardown re-rendered from the current blueprint, or None if that is impossible."""
+    try:
+        bp = E.Catalog.load(args.blueprints_dir).get(run.get("blueprint_id", ""))
+        return E.build_plan(bp, run.get("variables") or {}, which=lambda t: t).teardown
+    except E.DoogleError:
+        return None
+
+
 def cmd_teardown(args, out: Out) -> int:
     store = E.StateStore(E.resolve_state_path(args.state_dir))
     run = store.get(args.run_id)
+    preview = {p["id"]: p for p in E.teardown_preview(run)}
     if not args.apply:
         if out.as_json:
-            out.json({"run_id": run["run_id"], "mode": "dry-run", "teardown": run["teardown"]})
+            out.json({"run_id": run["run_id"], "mode": "dry-run", "teardown": [
+                dict(t, would_run=preview.get(t.get("id"), {}).get("run", False),
+                     skip_reason=preview.get(t.get("id"), {}).get("reason")) for t in run["teardown"]]})
             return 0
-        out.line(f"TEARDOWN DRY-RUN for {run['run_id']} ({run['blueprint_id']}, status {run['status']})")
+        out.line(f"TEARDOWN DRY-RUN for {run['run_id']} ({run.get('blueprint_id')}, status {run.get('status')})")
         out.line("Nothing has been executed.\n")
         for t in run["teardown"]:
-            tag = "MANUAL" if not t.get("argv") else f"risk={RISK_BADGE[t['risk']]}"
-            out.line(f"  - [{tag}] {t['id']}: {t['description']}")
+            p = preview.get(t.get("id"), {})
+            if not t.get("argv"):
+                tag = "MANUAL"
+            elif not p.get("run"):
+                tag = "WILL SKIP"
+            else:
+                tag = f"risk={RISK_BADGE.get(t.get('risk', 'high'), t.get('risk'))}"
+            out.line(f"  - [{tag}] {t.get('id')}: {t.get('description')}")
             if t.get("command"):
                 out.line(f"       $ {t['command']}")
+            if t.get("argv") and not p.get("run"):
+                out.line(f"       skipped: {p.get('reason')}")
         out.line(f"\nTo execute: doogle teardown {run['run_id']} --apply --approve-high-risk")
         return 0
     ex = E.Executor(store, on_event=_event_printer(out))
-    run = ex.teardown(run, _gates(args, "teardown", out))
+    run = ex.teardown(run, _gates(args, "teardown", out), expected=_expected_teardown(args, run))
     if out.as_json:
         out.json(run)
     else:
+        for w in run.get("teardown_warnings") or []:
+            out.err(f"warning: {w}")
         out.line(f"Teardown {run['teardown_status'].upper()} for {run['run_id']}")
         for t in run["teardown"]:
-            out.line(f"  {t['status']:<16} {t['id']}")
+            out.line(f"  {t['status']:<20} {t['id']}")
             if t["status"] == "manual_required":
                 out.line(f"      -> {t['description']}")
-    return 0 if run["teardown_status"] == "succeeded" else 1
+            elif t["status"] == "skipped_not_created":
+                out.line(f"      -> {t.get('skip_reason')}")
+    return 0 if run["teardown_status"] in ("succeeded", "nothing_to_run") else 1
 
 
 def cmd_history(args, out: Out) -> int:
@@ -596,8 +625,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             out.err(f"doogle: error: {exc}")
         return exc.exit_code
     except KeyboardInterrupt:
-        out.err("\ninterrupted; state saved up to the last finished step (see: doogle history)")
+        out.err("\ninterrupted; the run is recorded as 'interrupted'. Check what happened with "
+                "'doogle history latest', then 'doogle resume latest' or 'doogle teardown latest'.")
         return 130
+    except OSError as exc:
+        if out.as_json:
+            out.json({"error": str(exc), "error_type": type(exc).__name__, "exit_code": 1})
+        else:
+            out.err(f"doogle: error: {exc}")
+        return 1
 
 
 if __name__ == "__main__":  # pragma: no cover
