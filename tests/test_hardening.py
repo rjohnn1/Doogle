@@ -8,6 +8,7 @@ import copy
 import json
 import multiprocessing as mp
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -672,3 +673,325 @@ def test_typos_get_did_you_mean(capsys, tmp_path):
     assert code == 2 and "Did you mean 'project_id'?" in err
     code, _, err = run_cli(capsys, "explain", "zzzzzz", "--blueprints-dir", str(bps))
     assert code == 2 and "Did you mean" not in err and "Available: demo-bp" in err
+
+
+# --------------------------------------------------------------------------- mutation-driven tests
+# Each test below exists because a mutant of a safety-path function survived the first mutmut run.
+
+
+def _cmd_errors(command, declared=frozenset({"project_id"})):
+    errors: list[str] = []
+    V._validate_command("step x", command, set(declared), errors)
+    return errors
+
+
+@pytest.mark.parametrize("command,needle", [
+    ("gcloud projects describe `id`", "substitution"),
+    ("gcloud projects describe ${HOME}", "substitution"),
+    ("gcloud projects describe $(id)", "substitution"),
+    ("gcloud projects describe a\nb", "single line"),
+    ("gcloud a <<< b", "shell operator"),
+    ("gcloud a |& b", "shell operator"),
+    ("gcloud a ;; b", "shell operator"),
+    ("'tools\\gcloud' projects list", "path"),
+    ("gcloud projects describe {{project_id", "unbalanced"),
+    ("gcloud projects describe project_id}}", "unbalanced"),
+    ("gcloud projects describe {{ project_id }}x}}", "unbalanced"),
+    ("gcloud projects list --format=json --filter=x delete", None),
+])
+def test_validate_command_messages(command, needle):
+    errors = _cmd_errors(command)
+    if needle is None:
+        assert errors == [] or all(isinstance(e, str) for e in errors)
+        return
+    assert errors, command
+    assert all(isinstance(e, str) and e.startswith("step x: ") for e in errors)
+    assert any(needle in e.lower() for e in errors), errors
+
+
+def test_never_automated_pattern_is_found_at_the_end_and_named():
+    errors = _cmd_errors("gcloud projects delete")
+    assert any("'gcloud projects delete' must never be automated" in e for e in errors), errors
+    probs = V.recorded_argv_problems(["gcloud", "projects", "delete"], where="t")
+    assert any("t: 'gcloud projects delete' must never be automated" in p for p in probs), probs
+
+
+def test_validate_command_tool_errors_are_messages():
+    assert any("cannot be a variable" in e for e in _cmd_errors("{{project_id}} projects list"))
+    assert any("CONTRIBUTING.md" in e for e in _cmd_errors("terraform apply"))
+
+
+@pytest.mark.parametrize("tokens,bad", [
+    (["curl", "-s", "--data=a=b", "https://example.com"], True),
+    (["curl", "--request=POST", "https://example.com"], True),
+    (["curl", "-sX", "POST", "https://example.com"], True),
+    (["curl", "-Xs", "POST", "https://example.com"], True),
+    (["curl", "-sSo", "out", "https://example.com"], True),
+    (["curl", "-sS", "--max-time=5", "https://example.com"], False),
+    (["curl", "-s", "https://example.com/a=b"], False),
+    (["test", "-f", "deploy.sh"], False),
+    (["test", "-d", "delete-me"], False),
+    (["gcloud", "run", "services", "delete", "x"], True),
+    (["gcloud", "run", "services", "describe", "x"], False),
+    ([], False),
+])
+def test_readonly_rules_precisely(tokens, bad):
+    probs = V._readonly_problems(tokens)
+    assert bool(probs) is bad, (tokens, probs)
+    assert all(isinstance(p, str) for p in probs)
+
+
+def test_readonly_curl_names_the_offending_flag():
+    probs = V._readonly_problems(["curl", "--data=a=b", "https://example.com"])
+    assert probs and "--data" in probs[0] and "--data=a" not in probs[0]
+
+
+@pytest.mark.parametrize("argv,ok", [
+    ([], False),
+    ("gcloud projects list", False),
+    (["gcloud", 3], False),
+    (["gcloud", "projects", "describe", "a b"], True),       # spaces are fine inside one argv item
+    (["gcloud", "projects", "describe", "a\x7fb"], False),   # DEL
+    (["gcloud", "projects", "describe", "a\x1fb"], False),
+    (["gcloud", "projects", "describe", "a\x80b"], True),    # not a C0 control / DEL
+])
+def test_recorded_argv_shape(argv, ok):
+    assert (V.recorded_argv_problems(argv) == []) is ok
+
+
+def test_check_value_edges():
+    var = E.Variable(key="name", prompt="n", pattern=r"[a-z0-9-]+", example="my-name")
+    free = E.Variable(key="free", prompt="f")
+    E.check_value(free, "x" * E.MAX_VALUE_LENGTH)           # exactly the limit is allowed
+    with pytest.raises(E.VariableError, match=r"'free' is 513 characters long \(max 512\)"):
+        E.check_value(free, "x" * (E.MAX_VALUE_LENGTH + 1))
+    E.check_value(free, 12345)                               # non-strings are coerced, not crashed on
+    with pytest.raises(E.VariableError, match="does not match"):
+        E.check_value(var, 12.5)
+    for bad in ("a}}b", "a{{b"):
+        with pytest.raises(E.VariableError, match="cannot contain"):
+            E.check_value(free, bad)
+    with pytest.raises(E.VariableError, match=r"leading or trailing whitespace"):
+        E.check_value(free, "x ")
+    with pytest.raises(E.VariableError, match=r"\(example: my-name\)$"):
+        E.check_value(var, "UPPER")
+    noex = E.Variable(key="n2", prompt="n", pattern=r"[a-z]+")
+    with pytest.raises(E.VariableError, match=r"\[a-z\]\+$"):
+        E.check_value(noex, "UPPER")
+    with pytest.raises(E.VariableError, match=r"\(U\+200B, U\+202E\)"):
+        E.check_value(free, "a\u202e\u200bb")
+
+
+@pytest.mark.parametrize("template", ["gcloud {{a}} b}}", "gcloud {{a}} {{b"])
+def test_render_rejects_half_placeholders(template):
+    with pytest.raises(E.VariableError, match="unresolved placeholder in: "):
+        E.render_argv(template, {"a": "x"})
+    with pytest.raises(E.VariableError, match="unresolved placeholder"):
+        E.render_text(template, {"a": "x"})
+
+
+def _run_rec(**kw):
+    base = {"run_id": "r1", "steps": [], "teardown": [], "variables": {}}
+    base.update(kw)
+    return base
+
+
+def test_run_shape_rules():
+    E._check_run_shape({"run_id": "legacy"}, "run")             # old records without lists still load
+    for bad, msg in [([], "run is not an object"), ({"run_id": ""}, "run has no run_id"),
+                     (_run_rec(teardown=[1]), "has a malformed 'teardown' list"),
+                     (_run_rec(steps="x"), "has a malformed 'steps' list"),
+                     (_run_rec(variables=[]), "('r1') has malformed variables")]:
+        with pytest.raises(E.StateError, match=re.escape(msg)):
+            E._check_run_shape(bad, "run")
+
+
+def test_state_dir_is_created_deeply_and_idempotently(tmp_path):
+    deep = tmp_path / "a" / "b" / "c"
+    s1 = E.StateStore(deep / "state.json")
+    s1.save_run(_run_rec())
+    s2 = E.StateStore(deep / "state.json")
+    s2.save_run(_run_rec(run_id="r2"))
+    assert [r["run_id"] for r in s2.runs()] == ["r1", "r2"]
+    assert (deep / ".gitignore").read_text(encoding="utf-8").splitlines()[-1] == "*"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_backup_and_temp_files(tmp_path):
+    st = E.StateStore(tmp_path / "st" / "state.json")
+    st.save_run(_run_rec())
+    st.save_run(_run_rec(run_id="r2"))
+    assert stat.S_IMODE(st.backup_path.stat().st_mode) == 0o600
+    names = sorted(p.name for p in st.path.parent.iterdir())
+    assert names == [".gitignore", ".state.lock", "state.json", "state.json.bak"]  # no stray temp files
+    data = st.path.read_text(encoding="utf-8")
+    assert data.startswith("{\n  ") or data.startswith("[\n  ")   # human-readable for manual recovery
+
+
+def test_gate_messages_say_nothing_ran_and_pass_summary():
+    with pytest.raises(E.SafetyGateError) as ei:
+        E.enforce_gates(tools={"gcloud": None, "zz": None}, high_risk=[], gates=E.Gates(), summary="s")
+    msg = str(ei.value)
+    assert msg.startswith("refusing to start: required tool(s) not found on PATH: gcloud (")
+    assert "zz (install it)" in msg and msg.endswith(". Nothing was run.")
+    assert E.TOOL_HINTS["gcloud"] in msg
+    with pytest.raises(E.SafetyGateError) as ei:
+        E.enforce_gates(tools={}, high_risk=["a", "b"], gates=E.Gates(), summary="s")
+    assert str(ei.value) == "refusing to start: high-risk step(s) a, b require --approve-high-risk. Nothing was run."
+    with pytest.raises(E.SafetyGateError) as ei:
+        E.enforce_gates(tools={}, high_risk=[], gates=E.Gates(), summary="s", what="teardown")
+    assert str(ei.value).startswith("refusing to teardown without confirmation")
+    with pytest.raises(E.SafetyGateError) as ei:
+        E.enforce_gates(tools={}, high_risk=[], gates=E.Gates(), summary="s")
+    assert str(ei.value).startswith("refusing to apply without confirmation")
+    assert str(ei.value).endswith("review the plan and pass --yes. Nothing was run.")
+    seen = []
+    E.enforce_gates(tools={}, high_risk=[], gates=E.Gates(confirm=lambda s: seen.append(s) or True), summary="SUM")
+    assert seen == ["SUM"]
+
+
+def test_teardown_preview_reasons_are_exact():
+    run = _run_rec(
+        steps=[{"id": "made", "status": "succeeded"}, {"id": "existed", "status": "succeeded",
+                                                       "skip_reason": "already done"},
+               {"id": "never", "status": "pending"}],
+        teardown=[{"id": "m", "argv": []},
+                  {"id": "t1", "argv": ["gcloud", "x"], "undoes": ["existed"]},
+                  {"id": "t2", "argv": ["gcloud", "x"], "undoes": ["never", "ghost"]},
+                  {"id": "t3", "argv": ["gcloud", "x"], "undoes": ["made", "never"]}])
+    p = {e["id"]: e for e in E.teardown_preview(run)}
+    assert p["m"] == {"id": "m", "run": False, "reason": "manual"}
+    assert p["t1"]["run"] is False
+    assert p["t1"]["reason"] == ("not created by this run (existed=succeeded (already existed)); skipped so "
+                                 "Doogle never deletes resources it did not create")
+    assert p["t2"]["reason"].startswith("not created by this run (never=pending, ghost=missing); ")
+    assert p["t3"] == {"id": "t3", "run": True, "reason": None}
+
+
+def _two_teardowns():
+    data = minimal_data()
+    data["teardown"] = [
+        {"id": "undo-two", "description": "u2", "command": "firebase hosting:disable --project {{project_id}}",
+         "risk": "high", "undoes": ["two"]},
+        {"id": "undo", "description": "undo", "command": "gcloud delete {{project_id}}", "risk": "high",
+         "undoes": ["one"]},
+    ]
+    return make_bp(data)
+
+
+def _apply_demo(store, runner=None, bp=None):
+    bp = bp or make_bp()
+    plan = E.build_plan(bp, {"project_id": "demo-project"}, which=ALL_TOOLS)
+    ex = E.Executor(store, runner=runner or FakeRunner())
+    return ex, plan, ex.apply(plan, E.Gates(yes=True, approve_high_risk=True))
+
+
+def test_resume_refuses_finished_or_torn_down_runs(store):
+    ex, plan, run = _apply_demo(store)
+    assert run["status"] == "succeeded"
+    with pytest.raises(E.StateError, match="already succeeded; nothing to resume"):
+        ex.resume(run, plan, E.Gates(yes=True, approve_high_risk=True))
+    run["status"] = "failed"
+    run["teardown_status"] = "partial"
+    with pytest.raises(E.StateError, match="has been torn down"):
+        ex.resume(run, plan, E.Gates(yes=True, approve_high_risk=True))
+
+
+def test_resume_only_needs_high_risk_approval_for_pending_high_steps(store):
+    runner = FakeRunner({("gcloud", "create"): E.CommandResult(1, "", "boom")})
+    data = minimal_data()
+    data["steps"][0]["risk"] = "low"
+    ex, plan, run = _apply_demo(store, runner, make_bp(data))
+    assert run["status"] == "failed" and run["steps"][0]["hint"] is None
+    # step one (low) failed, step two (high) pending -> approval needed
+    with pytest.raises(E.SafetyGateError, match=r"high-risk step\(s\) two require"):
+        ex.resume(run, plan, E.Gates(yes=True))
+    # now pretend the high step already succeeded and only low work is left
+    run["steps"][1]["status"] = "succeeded"
+    ex.runner = FakeRunner()
+    out = ex.resume(run, plan, E.Gates(yes=True))
+    assert out["status"] == "succeeded"
+    one = out["steps"][0]
+    assert one["status"] == "succeeded" and one["output_tail"] and one["skip_reason"] is None
+    assert one["verify_status"] == "passed" and one["exit_code"] == 0 and out["resumed_at"]
+    assert out["finished_at"] and out["finished_at"] >= out["resumed_at"]
+
+
+def test_resume_tolerates_changed_commands_of_already_succeeded_steps(store):
+    runner = FakeRunner({("firebase", "deploy"): E.CommandResult(1, "", "boom")})
+    ex, plan, run = _apply_demo(store, runner)
+    assert [s["status"] for s in run["steps"]] == ["succeeded", "failed"]
+    run["steps"][0]["argv"] = ["gcloud", "create", "old-form"]   # succeeded step: history, not re-run
+    ex.runner = FakeRunner()
+    out = ex.resume(run, plan, E.Gates(yes=True, approve_high_risk=True))
+    assert out["status"] == "succeeded"
+    assert ex.runner.calls[0][:2] == ["firebase", "deploy"]
+    assert out["steps"][0]["argv"] == plan.steps[0].argv          # refreshed from the plan
+
+
+def test_teardown_status_and_entry_statuses(store):
+    bp = _two_teardowns()
+    runner = FakeRunner()
+    ex, _plan, run = _apply_demo(store, runner, bp)
+    # one of two fails -> partial; the failed entry is marked failed with its output
+    ex.runner = FakeRunner({("gcloud", "delete"): E.CommandResult(1, "", "PERMISSION_DENIED: nope")})
+    out = ex.teardown(copy.deepcopy(run), E.Gates(yes=True, approve_high_risk=True), which=ALL_TOOLS)
+    st = {t["id"]: t for t in out["teardown"]}
+    assert out["teardown_status"] == "partial"
+    assert st["undo"]["status"] == "failed" and st["undo"]["exit_code"] == 1
+    assert "PERMISSION_DENIED" in st["undo"]["output_tail"] and st["undo"]["hint"].startswith("permission denied")
+    assert st["undo-two"]["status"] == "succeeded" and st["undo-two"]["hint"] is None
+    assert st["undo"]["finished_at"] and out["teardown_finished_at"]
+    # all fail -> failed
+    ex.runner = FakeRunner({("gcloud",): E.CommandResult(1, "", "x"), ("firebase",): E.CommandResult(2, "", "y")})
+    out = ex.teardown(copy.deepcopy(run), E.Gates(yes=True, approve_high_risk=True), which=ALL_TOOLS)
+    assert out["teardown_status"] == "failed"
+    assert {t["status"] for t in out["teardown"]} == {"failed"}
+
+
+def test_teardown_continues_after_a_skipped_entry(store):
+    bp = _two_teardowns()
+    runner = FakeRunner({("firebase", "deploy"): E.CommandResult(1, "", "boom")})
+    ex, _plan, run = _apply_demo(store, runner, bp)        # 'two' failed -> still counts as touched
+    run["steps"][1]["status"] = "skipped"               # pretend it never ran
+    events = []
+    ex.on_event = lambda kind, payload: events.append((kind, payload.get("id")))
+    ex.runner = FakeRunner()
+    out = ex.teardown(run, E.Gates(yes=True, approve_high_risk=True), which=ALL_TOOLS)
+    assert [t["status"] for t in out["teardown"]] == ["skipped_not_created", "succeeded"]
+    assert ex.runner.calls == [["gcloud", "delete", "demo-project"]]
+    assert events == [("teardown_skipped", "undo-two"), ("teardown_started", "undo"), ("teardown_finished", "undo")]
+    assert out["teardown"][0]["skip_reason"].startswith("not created by this run (two=skipped)")
+
+
+def test_teardown_gates_use_the_binary_and_default_to_high_risk(store):
+    ex, _plan, run = _apply_demo(store)
+    with pytest.raises(E.SafetyGateError, match=r"not found on PATH: gcloud \("):
+        ex.teardown(copy.deepcopy(run), E.Gates(yes=True, approve_high_risk=True),
+                    which=lambda n: None if n == "gcloud" else f"/x/{n}")
+    legacy = copy.deepcopy(run)
+    legacy["teardown"][0].pop("risk", None)                # records without risk are treated as high
+    with pytest.raises(E.SafetyGateError, match=r"high-risk step\(s\) undo require"):
+        ex.teardown(legacy, E.Gates(yes=True), which=ALL_TOOLS)
+    seen = []
+    ex.teardown(copy.deepcopy(run), E.Gates(approve_high_risk=True, confirm=lambda s: seen.append(s) or True),
+                which=ALL_TOOLS)
+    assert seen == [f"Tear down run {run['run_id']} (1 commands)?"]
+
+
+def test_teardown_tamper_message_and_changed_blueprint_warning(store):
+    ex, plan, run = _apply_demo(store)
+    bad = copy.deepcopy(run)
+    bad["teardown"][0]["argv"] = ["bash", "-c", "x"]
+    with pytest.raises(E.StateError) as ei:
+        ex.teardown(bad, E.Gates(yes=True, approve_high_risk=True), which=ALL_TOOLS)
+    assert str(ei.value).startswith("refusing to tear down: the state file contains commands Doogle would never")
+    assert "teardown 'undo'" in str(ei.value) and str(ei.value).endswith("Nothing was run.")
+    changed = [E.PlannedTeardown(**{**t.__dict__, "argv": ["gcloud", "delete", "other"]}) for t in plan.teardown]
+    other = [E.PlannedTeardown(**{**t.__dict__, "id": "unrelated"}) for t in plan.teardown]
+    out = ex.teardown(copy.deepcopy(run), E.Gates(yes=True, approve_high_risk=True), which=ALL_TOOLS, expected=other)
+    assert out["teardown_warnings"] == []
+    out = ex.teardown(copy.deepcopy(run), E.Gates(yes=True, approve_high_risk=True), which=ALL_TOOLS,
+                      expected=changed)
+    assert out["teardown_warnings"] == ["teardown 'undo' differs from the current blueprint; running the "
+                                        "recorded command"]
