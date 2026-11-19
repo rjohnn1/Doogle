@@ -57,7 +57,7 @@ Hardening release candidate. See `docs/QUALITY_REPORT.md` for the evidence behin
   placeholder such as `YOUR_PROJECT_ID` is passed as a value.
 - `doogle ask`: better offline routing (stop-words, synonyms, phrases, out-of-scope lexicon,
   `not_covered`, `confident`); a 107-goal eval is part of the test suite with thresholds.
-- Tests: 187 -> 380+ (Hypothesis property/fuzz tests, real SIGINT test, concurrency test,
+- Tests: 187 -> 374 (Hypothesis property/fuzz tests, real SIGINT test, concurrency test,
   mutation-driven tests, human-readable CLI paths). CI: Python 3.10-3.14 + macOS, experimental
   Windows, ruff / mypy --strict / bandit / pip-audit job, sdist install check.
 - `docs/QUALITY_REPORT.md` and `docs/LIVE_TEST_PLAN.md`.
