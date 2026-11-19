@@ -20,8 +20,10 @@ from test_engine import ALL_TOOLS, BLUEPRINTS, REPO, FakeRunner, make_bp, minima
 TODAY = date(2026, 11, 19)
 
 
-def test_version_is_1_1():
-    assert __version__ == "1.1.0"
+def test_version_matches_pyproject():
+    pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    assert f'version = "{__version__}"' in pyproject
+    assert __version__ == "1.2.0rc1"
 
 
 # --------------------------------------------------------------------------- validator module

@@ -6,6 +6,65 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0rc1] - 2026-11-19
+
+Hardening release candidate. See `docs/QUALITY_REPORT.md` for the evidence behind every item.
+
+### Security / safety (fixed)
+- **Teardown no longer deletes resources the run did not create.** Automated teardown entries
+  must declare `undoes: [step ids]`; an entry runs only if one of those steps actually executed
+  in this run (not skipped by `skip_if`, not never-reached). Previously, `firebase-auth-mvp`
+  teardown could delete a pre-existing `(default)` Firestore database, and IAM-grant teardowns
+  could remove bindings that existed before. `doogle teardown` shows `WILL SKIP` and why.
+  Runs recorded by v1.1 (no `undoes` on disk) tear down exactly as before.
+- The state file is no longer trusted: `resume` re-renders every command from the blueprint and
+  refuses if `argv`, `verify_argv` or `skip_argv` on disk differ; expectations (`verify_expect`,
+  risk, manual, timeouts) always come from the blueprint. `teardown` refuses recorded commands
+  outside the tool allow-list or matching a never-automated pattern.
+- Tool allow-list (`gcloud`, `gsutil`, `bq`, `firebase`, `clasp`, `curl`, `test`); `env bash -c`,
+  `python3 -c` and similar are rejected. `verify_command`/`skip_if` must be read-only (no
+  state-changing words; curl may not upload, write or change method). `disable` and
+  `firestore:delete` count as destructive (must be `risk: high`).
+- Variable values: max 512 chars; bidi/invisible/format characters, NEL/LS/PS and surrounding
+  whitespace rejected.
+- Output tails are redacted (API keys, OAuth access/refresh tokens, client secrets, JWTs,
+  GitHub/Slack/`sk-` tokens, `Authorization` headers, `key=value` secrets, token query params,
+  personal emails) before being printed or stored.
+- `.doogle/` is `0700`, `state.json` `0600`; writes are atomic, fsynced, locked (concurrent
+  `doogle` processes previously lost runs) and keep `state.json.bak`.
+- Hostile YAML: aliases rejected (billion-laughs / recursion), 256 KiB and depth caps, binary
+  files, wrong types and non-string keys give validation errors instead of tracebacks.
+
+### Fixed
+- Ctrl-C mid-step records the step and run as `interrupted` (exit 130) and both `resume` and
+  `teardown` work afterwards.
+- Malformed or truncated `state.json` gives a clean error naming the backup, never a traceback.
+- `firebase-auth-mvp`: creates the default Hosting site explicitly (`firebase hosting:sites:create`)
+  because new Firebase projects no longer get one automatically, so non-interactive deploys work.
+- `solo-serverless-api`, `gemini-adk-service`: document the `roles/run.builder` requirement for
+  source deploys, the `run-sources-*` bucket and Artifact Registry leftovers, and that deploying
+  over an existing service of the same name replaces it.
+- IAM grants in `gemini-adk-service` and `ai-studio-to-vertex` have `skip_if` checks so teardown
+  only removes bindings Doogle added.
+- `scripts/check_cli_syntax.py` reports unknown firebase/clasp subcommands as unknown commands
+  (they print top-level help with exit 0) instead of "flag not found".
+- An exact run id now wins over a prefix match.
+
+### Added
+- Actionable `hint:` lines for common failures (not logged in, billing disabled, API not enabled
+  yet, project not found, permission denied, quota) on failed steps and teardown entries.
+- "Did you mean ...?" for blueprint id and variable name typos; a specific message when a docs
+  placeholder such as `YOUR_PROJECT_ID` is passed as a value.
+- `doogle ask`: better offline routing (stop-words, synonyms, phrases, out-of-scope lexicon,
+  `not_covered`, `confident`); a 107-goal eval is part of the test suite with thresholds.
+- Tests: 187 -> 380+ (Hypothesis property/fuzz tests, real SIGINT test, concurrency test,
+  mutation-driven tests, human-readable CLI paths). CI: Python 3.10-3.14 + macOS, experimental
+  Windows, ruff / mypy --strict / bandit / pip-audit job, sdist install check.
+- `docs/QUALITY_REPORT.md` and `docs/LIVE_TEST_PLAN.md`.
+
+### Changed
+- README quickstart installs with `pipx`/`pip` from git or from a clone.
+
 ## [1.1.0] - 2026-11-19
 
 ### Added
@@ -51,6 +110,7 @@ All notable changes to this project are documented here. The format follows
   Gemini), `doctor`, `validate`; `.doogle/state.json` run records; strict schema validator;
   blueprints `solo-serverless-api`, `gemini-adk-service`, `workspace-sheet-webhook`.
 
-[Unreleased]: https://github.com/OWNER/REPO/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/OWNER/REPO/compare/v1.2.0rc1...HEAD
+[1.2.0rc1]: https://github.com/OWNER/REPO/compare/v1.1.0...v1.2.0rc1
 [1.1.0]: https://github.com/OWNER/REPO/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/OWNER/REPO/releases/tag/v1.0.0

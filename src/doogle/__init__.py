@@ -8,6 +8,6 @@ Doogle is an independent community project. It is not affiliated with,
 endorsed by, or sponsored by Google LLC.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0rc1"
 
 __all__ = ["__version__"]

@@ -99,7 +99,7 @@ def store(tmp_path) -> E.StateStore:
 
 
 def test_version():
-    assert re.fullmatch(r"\d+\.\d+\.\d+", __version__) and __version__.startswith("1.")
+    assert re.fullmatch(r"\d+\.\d+\.\d+((a|b|rc)\d+)?", __version__) and __version__.startswith("1.")
 
 
 def test_shipped_blueprints_all_valid():
