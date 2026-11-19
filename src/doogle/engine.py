@@ -465,6 +465,11 @@ def check_value(var: Variable, value: str) -> None:
     if "{{" in value or "}}" in value:
         raise VariableError(f"variable '{var.key}' cannot contain '{{{{' or '}}}}'")
     if var.pattern and not re.fullmatch(var.pattern, value):
+        if re.fullmatch(r"(YOUR|MY)_[A-Z_]+|<[^>]+>|\[[^\]]+\]", value):
+            example = f" (for example {var.example})" if var.example else ""
+            where = "; list your project IDs with: gcloud projects list" if "project" in var.key else ""
+            raise VariableError(f"'{value}' for '{var.key}' is a placeholder from the docs: replace it with "
+                                f"your own value{example}{where}")
         hint = f" (example: {var.example})" if var.example else ""
         raise VariableError(f"variable '{var.key}'='{value}' does not match required pattern {var.pattern}{hint}")
 

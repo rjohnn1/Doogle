@@ -56,7 +56,14 @@ git-ignored and contains its own `.gitignore`.
    steps pause the run; resume once you have done them.
 6. **Clean up**: `doogle teardown latest` shows the exact recorded commands;
    `doogle teardown latest --apply --approve-high-risk` runs them, continues past individual
-   failures and records each result. Finish any `MANUAL` teardown entries by hand.
+   failures and records each result. Entries whose resources this run did not create (the step
+   was skipped because the resource already existed, or never ran) show `WILL SKIP` with the
+   reason and are not executed. Finish any `MANUAL` teardown entries by hand.
+7. **If something goes wrong**: a failed step prints a one-line `hint:` for common causes (not
+   logged in, billing disabled, API not enabled yet, project not found, permission denied, quota).
+   Ctrl-C marks the run `interrupted`; `doogle resume latest` or `doogle teardown latest` both work
+   afterwards. If `.doogle/state.json` is corrupted, Doogle stops with a clear error; the previous
+   version is in `.doogle/state.json.bak`.
 
 Variables can come from a file instead of flags:
 

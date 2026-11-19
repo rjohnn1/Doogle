@@ -78,20 +78,30 @@ output must contain), `skip_if` + `skip_if_expect` (read-only check; if it match
 skipped as already done, which makes re-runs safe), `timeout_seconds`, or `manual: true`
 (instructions only; the run pauses until the user confirms and resumes).
 
-Teardown fields: `id`, `description`, `command`, `risk` (default `high`), or `manual: true`.
+Teardown fields: `id`, `description`, `command`, `risk` (default `high`), `undoes` (required for
+every automated entry: the step ids whose resources it removes), or `manual: true`.
+
+`undoes` is what keeps teardown honest: an entry only runs if at least one of the listed steps was
+actually executed by that run. If the step was skipped by `skip_if` (the resource already existed)
+or never reached, the entry is skipped, so Doogle never deletes something it did not create. Any
+step that grants or creates something a teardown entry removes should therefore have a `skip_if`.
 
 ### Command rules (enforced by the validator)
 
 * One tool invocation per step. No `|`, `&&`, `;`, redirects, `$( )`, backticks or `${}`.
-* The first word is a bare tool name (`gcloud`, `firebase`, `clasp`, `curl`...), never a path, a
-  variable, `sudo`, `rm` or a shell (`bash -c` is rejected).
+* The first word must be on the allow-list: `gcloud`, `gsutil`, `bq`, `firebase`, `clasp`, `curl`
+  or `test`. Never a path or a variable. Adding a tool is an engine change (edit
+  `ALLOWED_BINARIES` in `validator.py`, with tests), not a blueprint change.
 * Quote arguments a shell would choke on, e.g. `'--format=value(status.url)'`, `'--database=(default)'`.
 * `{{placeholders}}` must be declared variables. Values are substituted *inside* tokens and never
   re-split, so `--member serviceAccount:{{sa}}@{{project_id}}.iam.gserviceaccount.com` is safe.
 * Commands containing `delete`, `undeploy`, `remove-iam-policy-binding`, `destroy` or `purge`
   must be `risk: high`. `gcloud projects delete`, `gcloud organizations ...` and
   `gcloud billing accounts ...` are never allowed.
-* `verify_command` and `skip_if` must be read-only.
+* `verify_command` and `skip_if` must be read-only: no state-changing words (`create`, `delete`,
+  `deploy`, `enable`, `add-iam-policy-binding`...), and `curl` may not upload, write files or change
+  the method (`-d`, `-F`, `-T`, `-o`, `-X`...). `curl` is never allowed in teardown.
+* Blueprint files are capped at 256 KiB and 32 levels of nesting; YAML anchors/aliases are rejected.
 * Pass `--project {{project_id}}` explicitly instead of changing the user's gcloud config.
 * If a step cannot be automated honestly (console-only settings, browser logins), make it a
   `manual` step with exact instructions rather than a fragile workaround.

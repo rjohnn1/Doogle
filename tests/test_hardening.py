@@ -1058,3 +1058,10 @@ def test_resume_takes_expectations_from_the_blueprint_not_the_state_file(store):
     assert one["verify_expect"] == plan.steps[0].verify_expect and one["manual"] is False
     assert one["public_exposure"] is plan.steps[0].public_exposure
     assert one["timeout_seconds"] == plan.steps[0].timeout_seconds and one["risk"] == plan.steps[0].risk
+
+
+@pytest.mark.parametrize("value", ["YOUR_PROJECT_ID", "<project-id>", "[PROJECT]", "MY_PROJECT"])
+def test_doc_placeholders_get_a_specific_message(capsys, value):
+    code, _, err = run_cli(capsys, "plan", "solo-serverless-api", "--var", f"project_id={value}",
+                           "--blueprints-dir", str(BLUEPRINTS))
+    assert code == 2 and "is a placeholder from the docs" in err and "gcloud projects list" in err

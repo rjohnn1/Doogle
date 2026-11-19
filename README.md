@@ -61,16 +61,32 @@ Add `--ai` to also ask Gemini (optional); the AI can only pick from the catalog 
 
 Requires Python 3.10+. Cloud tools (`gcloud`, `firebase`, `clasp`) are only needed when you apply a blueprint.
 
+Install it as a tool (recommended), straight from GitHub:
+
+```bash
+pipx install "git+https://github.com/OWNER/REPO.git"      # or: pip install "git+https://github.com/OWNER/REPO.git"
+```
+
+or work from a clone (needed to contribute blueprints):
+
 ```bash
 git clone https://github.com/OWNER/REPO.git doogle && cd doogle
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"          # add ,ai for optional Gemini routing: ".[ai,dev]"
+```
+
+Then, from any directory:
+
+```bash
 doogle doctor                    # read-only checks: Python, blueprints, tools, sign-in state
 doogle list                      # every blueprint with its verification level and age
 doogle ask "move my gemini prototype from ai studio to production"
 doogle explain ai-studio-to-vertex
-doogle plan ai-studio-to-vertex --var project_id=YOUR_PROJECT_ID
+doogle plan ai-studio-to-vertex --var project_id=my-side-project-123   # use your own project ID
 ```
+
+Project IDs are the lowercase ID shown by `gcloud projects list` (not the display name).
+Anywhere the docs say `YOUR_PROJECT_ID`, substitute yours.
 
 `list`, `explain`, `plan`, `ask` (offline), `doctor`, `history`, `docs`, `share` and `validate`
 never touch the network or your cloud resources, and work without any Google CLI installed.
@@ -92,7 +108,7 @@ never touch the network or your cloud resources, and work without any Google CLI
 | `doogle share <id> [--repo-url URL]` | Print a "Built with a Doogle blueprint" badge and blurb for your project's README |
 | `doogle validate [--blueprints-dir D]` | Strict schema check (CI uses this) |
 
-Every command except `resume` accepts `--json`. Exit codes: `0` ok, `1` runtime failure or
+Every command accepts `--json`. Exit codes: `0` ok, `1` runtime failure or
 out-of-date docs, `2` invalid input or blueprint, `3` blocked by a safety gate (nothing ran).
 
 ## Safety rules
@@ -103,10 +119,12 @@ out-of-date docs, `2` invalid input or blueprint, `3` blocked by a safety gate (
 4. **Tools are checked up front.** If a required CLI is missing, Doogle refuses before step 1.
 5. **No shell, ever.** Templates are tokenised before variables are substituted, so a value always becomes exactly one argument. Values are pattern-checked, cannot start with `-`, cannot contain newlines, and any unresolved `{{placeholder}}` is an error. Displayed commands are shell-quoted.
 6. **Idempotent where possible.** Steps can declare a read-only `skip_if` check, so re-running on a project that already has the resource does not fail.
-7. **Verified, not assumed.** Steps declare a read-only `verify_command` plus expected output; exit code 0 alone is not success.
-8. **Everything is recorded.** Each run writes step statuses, timestamps, exit codes, output tails, variables and the rendered teardown commands to `.doogle/state.json` after every step. `.doogle/` is git-ignored.
-9. **No secrets in blueprints.** The validator rejects secret-looking variables, exact price claims, shell operators, `sudo`/`rm`/shell interpreters, and never allows `gcloud projects delete`.
-10. **Honest freshness.** Every blueprint states when and how it was last verified (`simulated`, `syntax-checked` or `live`) and against which CLI versions. `doogle list` and `explain` warn when that is more than 180 days old.
+7. **Verified, not assumed.** Steps declare a read-only `verify_command` plus expected output; exit code 0 alone is not success. `verify_command` and `skip_if` are checked to be read-only (no create/delete/deploy/enable words, no curl uploads or method changes).
+8. **Teardown only removes what this run created.** Every automated teardown entry declares `undoes: [step ids]`; if those steps were skipped because the resource already existed, or never ran, the entry is skipped (`doogle teardown` shows `WILL SKIP` and why).
+9. **The state file is not trusted.** `resume` re-renders every command from the blueprint and refuses if `.doogle/state.json` differs; `teardown` refuses recorded commands that use a tool outside the allow-list or a never-automated pattern. The file is written atomically, `0600` in a `0700` directory, under a lock, with a `.bak` copy.
+10. **Everything is recorded, secrets are not.** Each run records step statuses, timestamps, exit codes, output tails, variables and the rendered teardown. Output tails are redacted (API keys, OAuth tokens, JWTs, `Authorization` headers, `key=value` secrets, personal emails) before being printed or stored. `.doogle/` is git-ignored.
+11. **Allow-listed tools only.** Blueprint commands may only call `gcloud`, `gsutil`, `bq`, `firebase`, `clasp`, `curl` (read-only) and `test`. The validator rejects secret-looking variables, exact price claims, shell operators and substitutions, interpreters, and never allows `gcloud projects delete`.
+12. **Honest freshness.** Every blueprint states when and how it was last verified (`simulated`, `syntax-checked` or `live`) and against which CLI versions. `doogle list` and `explain` warn when that is more than 180 days old.
 
 ## Privacy: no telemetry
 
