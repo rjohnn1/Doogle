@@ -573,3 +573,47 @@ def test_cli_unwritable_state_dir_is_clean(capsys, tmp_path, monkeypatch):
                            "--apply", "--yes", "--approve-high-risk", "--state-dir", str(ro / "sub"))
     ro.chmod(0o700)
     assert code == 1 and "Permission denied" in err and "Traceback" not in err
+
+
+# --------------------------------------------------------------------------- syntax checker script
+
+def _checker():
+    import importlib.util
+    script = BLUEPRINTS.parent / "scripts" / "check_cli_syntax.py"
+    spec = importlib.util.spec_from_file_location("check_cli_syntax", script)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shebang script")
+def test_syntax_checker_captures_help_and_detects_unknown_commands(tmp_path):
+    mod = _checker()
+    fake = tmp_path / "firebase"
+    fake.write_text(textwrap.dedent(f"""\
+        #!{sys.executable}
+        import sys
+        if sys.argv[1:] == ["hosting:disable", "--help"]:
+            print("Usage: firebase hosting:disable [options]\\n  --force  skip confirmation")
+        else:
+            print("Usage: firebase [options] [command]\\n  --project  global")
+        """), encoding="utf-8")
+    fake.chmod(0o755)
+    mod.help_text.cache_clear()
+    rc, text = mod.help_text((str(fake), "hosting:disable"))
+    assert rc == 0 and "--force" in text  # output is captured, not printed
+    assert mod.resolve_help(str(fake), ["hosting:disable"]) is not None
+    # unknown commands fall back to top-level help with exit 0: must be reported as unknown
+    fake_named = tmp_path / "bin"
+    fake_named.mkdir()
+    (fake_named / "firebase").write_text(fake.read_text(encoding="utf-8"), encoding="utf-8")
+    (fake_named / "firebase").chmod(0o755)
+    old = os.environ["PATH"]
+    os.environ["PATH"] = f"{fake_named}{os.pathsep}{old}"
+    try:
+        mod.help_text.cache_clear()
+        assert mod.resolve_help("firebase", ["hosting:disabl"]) is None
+        assert mod.resolve_help("firebase", ["hosting:disable"])[0] == ["hosting:disable"]
+    finally:
+        os.environ["PATH"] = old
+        mod.help_text.cache_clear()

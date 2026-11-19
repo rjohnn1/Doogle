@@ -22,7 +22,7 @@ import re
 import secrets
 import shlex
 import shutil
-import subprocess
+import subprocess  # nosec B404 - used only with argv lists, never shell=True
 import sys
 import tempfile
 import unicodedata
@@ -839,7 +839,7 @@ class CommandResult:
 def subprocess_runner(argv: Sequence[str], timeout: int) -> CommandResult:
     """Run argv without a shell (never ``shell=True``); capture output as UTF-8 with replacement."""
     try:
-        proc = subprocess.run(list(argv), capture_output=True, text=True, encoding="utf-8",
+        proc = subprocess.run(list(argv), capture_output=True, text=True, encoding="utf-8",  # nosec B603 - argv, no shell
                               errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, check=False)
     except FileNotFoundError:
         return CommandResult(127, "", f"command not found: {argv[0]}")
@@ -1429,8 +1429,8 @@ def route(goal: str, catalog: Catalog, use_ai: bool = False, top: int = 3,
 
 def _local_cmd(argv: Sequence[str], timeout: int = 15) -> str | None:
     try:
-        proc = subprocess.run(list(argv), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                              timeout=timeout, stdin=subprocess.DEVNULL, check=False)
+        proc = subprocess.run(list(argv), capture_output=True, text=True, encoding="utf-8",  # nosec B603
+                              errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if proc.returncode != 0:

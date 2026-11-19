@@ -23,7 +23,7 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
+import subprocess  # nosec B404 - argv only, never shell
 import sys
 from functools import cache
 from pathlib import Path
@@ -39,7 +39,7 @@ ENV = dict(os.environ, CLOUDSDK_CORE_DISABLE_PROMPTS="1", NO_COLOR="1", FORCE_CO
 @cache
 def help_text(argv: tuple[str, ...]) -> tuple[int, str]:
     try:
-        proc = subprocess.run([*argv, "--help"], check=False, capture_output=True, text=True, timeout=120,
+        proc = subprocess.run([*argv, "--help"], check=False, capture_output=True, text=True, timeout=120,  # nosec B603
                               stdin=subprocess.DEVNULL, env=ENV)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, str(exc)
@@ -48,7 +48,7 @@ def help_text(argv: tuple[str, ...]) -> tuple[int, str]:
 
 def tool_version(tool: str) -> str:
     try:
-        out = subprocess.run([tool, "--version"], check=False, capture_output=True, text=True, timeout=60,
+        out = subprocess.run([tool, "--version"], check=False, capture_output=True, text=True, timeout=60,  # nosec B603
                              stdin=subprocess.DEVNULL, env=ENV).stdout
     except (OSError, subprocess.TimeoutExpired):
         return "?"
@@ -65,10 +65,19 @@ def command_path(tokens: list[str]) -> list[str]:
     return path
 
 
+def _usage_mentions(text: str, tool: str, path: list[str]) -> bool:
+    """firebase/clasp print the *top-level* help (exit 0) for unknown commands, so the
+    Usage line must name the command we asked about."""
+    if tool not in ("firebase", "clasp") or not path:
+        return True
+    usage = next((ln for ln in text.splitlines() if ln.strip().lower().startswith("usage:")), "")
+    return " ".join(path) in usage
+
+
 def resolve_help(tool: str, path: list[str]) -> tuple[list[str], str] | None:
     for n in range(len(path), -1, -1):
         rc, text = help_text((tool, *path[:n]))
-        if rc == 0 and text.strip():
+        if rc == 0 and text.strip() and _usage_mentions(text, tool, path[:n]):
             if n == 0 and path:
                 return None  # not even the first subcommand exists
             return path[:n], text

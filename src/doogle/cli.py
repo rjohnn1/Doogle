@@ -463,7 +463,7 @@ def cmd_doctor(args: argparse.Namespace, out: Out) -> int:
     if out.as_json:
         out.json(report)
     else:
-        icon = {"pass": "ok  ", "warn": "WARN", "fail": "FAIL", "info": "info"}
+        icon = {"pass": "ok  ", "warn": "WARN", "fail": "FAIL", "info": "info"}  # nosec B105 - status labels
         out.line("Doogle doctor (read-only; no cloud calls)\n")
         for c in report["checks"]:
             out.line(f"  [{icon[c['status']]}] {c['name']}: {c['detail']}")

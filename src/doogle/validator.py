@@ -552,7 +552,7 @@ def safe_load_blueprint_text(text: str) -> Any:
     """``yaml.safe_load`` without aliases and with a size cap. Raises ``yaml.YAMLError`` or ``ValueError``."""
     if len(text.encode("utf-8", errors="replace")) > MAX_BLUEPRINT_BYTES:
         raise ValueError(f"blueprint.yaml is larger than {MAX_BLUEPRINT_BYTES // 1024} KiB")
-    return yaml.load(text, Loader=_NoAliasSafeLoader)  # noqa: S506 - SafeLoader subclass
+    return yaml.load(text, Loader=_NoAliasSafeLoader)  # noqa: S506  # nosec B506 - SafeLoader subclass
 
 
 # --------------------------------------------------------------------------- recorded commands
