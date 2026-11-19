@@ -1164,34 +1164,68 @@ class Executor:
 
 STOPWORDS = set("""a an and are as at be but by can do for from get have i if in into is it its just me my
 need of on or our so some that the their them then there this to too up use using want we what when which
-who will with without would you your like make build set setup something thing things very really""".split())
+who will with without would you your like make build set setup something thing things very really how now
+please help any all should could""".split())
 
 SYNONYMS = {
     "cheap": ["cost", "free", "budget", "scale-to-zero"],
     "cheapest": ["cheap"], "inexpensive": ["cheap"], "affordable": ["cheap"], "low-cost": ["cheap"],
-    "free": ["cheap"], "budget": ["cheap"],
+    "free": ["cheap"], "budget": ["cheap"], "tiny": ["cheap"],
     "api": ["backend", "endpoint", "rest"], "apis": ["api"], "endpoint": ["api"], "backend": ["api"],
     "microservice": ["api", "container"], "server": ["backend"], "service": ["backend"],
     "hobby": ["side-project"], "side": ["side-project"], "prototype": ["side-project"], "mvp": ["side-project"],
-    "agent": ["ai", "llm"], "agents": ["agent"], "chatbot": ["agent", "ai"], "bot": ["chatbot"],
+    "hackathon": ["mvp"],
+    "agent": ["ai", "llm"], "agents": ["agent"], "chatbot": ["agent", "ai"],
     "assistant": ["agent"], "llm": ["ai", "gemini"], "genai": ["ai", "gemini"], "gpt": ["llm"],
+    "langchain": ["agent"],
     "spreadsheet": ["sheet"], "sheets": ["sheet"], "excel": ["spreadsheet"], "form": ["sheet", "form"],
     "forms": ["form"], "zap": ["automation"], "zapier": ["automation", "webhook"], "automate": ["automation"],
-    "workflow": ["automation"], "nocode": ["no-code"], "lowcode": ["no-code"],
-    "docker": ["container"], "containers": ["container"], "serverless": ["scale-to-zero"],
+    "workflow": ["automation"], "nocode": ["no-code"], "lowcode": ["no-code"], "glue": ["automation"],
+    "docker": ["container"], "containers": ["container"], "containerize": ["container"],
+    "serverless": ["scale-to-zero"],
+    "registration": ["signup"], "register": ["signup"], "login": ["auth"], "signup": ["auth"],
+    "nosql": ["firestore", "database"], "db": ["database"],
+    "keyless": ["adc", "iam"], "workload-identity": ["adc", "iam"],
 }
+
+# Two-word phrases folded into one token before matching, so "log in" is not "log".
+PHRASES = {"log in": "login", "sign in": "sign-in", "sign up": "signup", "side project": "side-project",
+           "scale to zero": "scale-to-zero", "no code": "no-code", "low code": "low-code",
+           "workload identity": "workload-identity", "web app": "web-app"}
+
+# Products and goals no blueprint covers. Mentioning one caps confidence at "low" unless a
+# blueprint also matches strongly, so Doogle says "no confident match" instead of guessing.
+OUT_OF_SCOPE = {
+    "bigquery", "warehouse", "gke", "kubernetes", "k8s", "compute-engine", "vm", "vms", "cloud-sql", "sql",
+    "postgres", "mysql", "s3", "aws", "azure", "terraform", "vpn", "interconnect", "analytics", "monitoring",
+    "dashboards", "alert", "alerts", "pubsub", "pub-sub", "dataflow", "dataproc", "tpu", "tpus", "gpu",
+    "ios", "android", "push", "notifications", "wordpress", "video", "stream", "streaming", "cdn", "domain",
+    "email", "emails", "marketing", "backup", "backups", "cron", "learn", "weather", "train", "training",
+    "classification", "fine-tune", "fine-tuning",
+}
+# Keywords too generic to be trusted on their own (worth less than a specific keyword).
+GENERIC_KEYWORDS = {"api", "users", "database", "migrate", "migration", "production", "service account",
+                    "iam", "website", "frontend", "backend", "http", "container", "ai", "form", "automation",
+                    "workspace", "enterprise", "startup", "gmail"}
+
+
+def _singular(w: str) -> str:
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def _canonical(text: str) -> str:
+    """Lower-case, underscores and dots to spaces, singular words, common phrases folded."""
+    words = [_singular(w) for w in re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", text.lower().replace("_", " "))]
+    out = " ".join(words)
+    for phrase, token in PHRASES.items():
+        out = re.sub(r"(?<![a-z0-9-])" + re.escape(phrase) + r"(?![a-z0-9-])", token, out)
+    return out
 
 
 def _normalise(text: str) -> list[str]:
-    words = re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", text.lower())
-    out = []
-    for w in words:
-        if w in STOPWORDS:
-            continue
-        if len(w) > 4 and w.endswith("s") and not w.endswith("ss"):
-            w = w[:-1]
-        out.append(w)
-    return out
+    return [w for w in _canonical(text).split() if w not in STOPWORDS]
 
 
 def _expand(tokens: Iterable[str]) -> set[str]:
@@ -1207,29 +1241,52 @@ def _expand(tokens: Iterable[str]) -> set[str]:
 
 
 def _phrase_in(phrase: str, text: str) -> bool:
-    return re.search(r"(?<![a-z0-9])" + re.escape(phrase.lower()) + r"(?![a-z0-9])", text) is not None
+    return re.search(r"(?<![a-z0-9-])" + re.escape(phrase) + r"(?![a-z0-9-])", text) is not None
 
 
 def route_offline(goal: str, blueprints: Iterable[Blueprint], top: int = 3) -> dict:
-    """Deterministic keyword/heuristic routing. No network."""
-    goal_l = " ".join(goal.lower().split())
-    raw_tokens = set(_normalise(goal_l))
+    """Deterministic keyword/heuristic routing. No network.
+
+    Scoring per blueprint: a specific keyword found in the goal = 3, a generic one = 1.5, a keyword
+    reached only through a synonym = 1 (at most 2 in total), and 0.5 per other shared word in its
+    description. Words that are part of a matched multi-word keyword (e.g. "api key") do not also
+    count as single keywords elsewhere ("api"). Goals that mention an uncovered product get at most
+    "low" confidence unless a blueprint matches strongly.
+    """
+    blueprints = list(blueprints)
+    goal_c = _canonical(goal)
+    raw_tokens = set(_normalise(goal))
+    # multi-word keywords present in the goal consume their words
+    consumed: set[str] = set()
+    for bp in blueprints:
+        for kw in bp.keywords:
+            kw_c = _canonical(kw)
+            if " " in kw_c and _phrase_in(kw_c, goal_c):
+                consumed.update(kw_c.split())
+    single_tokens = raw_tokens - consumed
     goal_tokens = _expand(raw_tokens)
+    out_of_scope = sorted(raw_tokens & OUT_OF_SCOPE)
     results = []
     for bp in blueprints:
         score = 0.0
+        synonym_score = 0.0
         reasons = []
+        matched_words: set[str] = set()
         for kw in bp.keywords:
-            kw_l = kw.lower()
-            if _phrase_in(kw_l, goal_l) or (" " not in kw_l and kw_l in raw_tokens):
-                score += 3
+            kw_c = _canonical(kw)
+            weight = 1.5 if kw.lower() in GENERIC_KEYWORDS else 3.0
+            if (" " in kw_c and _phrase_in(kw_c, goal_c)) or (" " not in kw_c and kw_c in single_tokens):
+                score += weight
                 reasons.append(f"keyword '{kw}'")
-            elif " " not in kw_l and kw_l in goal_tokens:
-                score += 1.5
+                matched_words.update(kw_c.split())
+            elif " " not in kw_c and kw_c in goal_tokens and kw_c not in consumed and synonym_score < 2:
+                synonym_score += 1
                 reasons.append(f"related to '{kw}'")
+                matched_words.add(kw_c)
+        score += synonym_score
         text_tokens = set(_normalise(" ".join([bp.name, bp.tagline, bp.category, *bp.when_to_use,
                                                *(s["name"] for s in bp.services)])))
-        overlap = sorted((goal_tokens & text_tokens) - {r.split("'")[1] for r in reasons})
+        overlap = sorted((goal_tokens & text_tokens) - matched_words - consumed)
         if overlap:
             score += 0.5 * len(overlap)
             reasons.append("mentions " + ", ".join(overlap[:6]))
@@ -1251,7 +1308,9 @@ def route_offline(goal: str, blueprints: Iterable[Blueprint], top: int = 3) -> d
         confidence = "medium"
     else:
         confidence = "low"
-    return {
+    if out_of_scope and matches and matches[0]["score"] < 6:
+        confidence = "low"
+    result = {
         "goal": goal,
         "mode": "offline",
         "confidence": confidence,
@@ -1262,6 +1321,10 @@ def route_offline(goal: str, blueprints: Iterable[Blueprint], top: int = 3) -> d
                        if matches else ["doogle list", "Describe the goal with product words, e.g. "
                                         "'API', 'agent', 'spreadsheet', 'webhook'"]),
     }
+    result["confident"] = confidence in ("medium", "high")
+    if out_of_scope:
+        result["not_covered"] = out_of_scope
+    return result
 
 
 class AIUnavailable(DoogleError):

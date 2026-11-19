@@ -682,7 +682,8 @@ SECRET_PATTERNS = [
 
 
 def test_no_secrets_in_repository():
-    skip = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", "dist", "build", ".doogle"}
+    skip = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", "dist", "build", ".doogle", "mutants",
+            ".hypothesis", ".mypy_cache", ".ruff_cache"}
     for path in REPO.rglob("*"):
         if any(part in skip or part.endswith(".egg-info") for part in path.parts) or not path.is_file():
             continue

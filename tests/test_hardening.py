@@ -29,7 +29,7 @@ from test_engine import ALL_TOOLS, BLUEPRINTS, FakeRunner, make_bp, minimal_data
 GATES = E.Gates(yes=True, approve_high_risk=True)
 SHIPPED_DATA = {p.parent.name: yaml.safe_load(p.read_text(encoding="utf-8"))
                 for p in sorted(BLUEPRINTS.glob("[!_]*/blueprint.yaml"))}
-FUZZ = settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+FUZZ = settings(max_examples=int(os.environ.get("DOOGLE_FUZZ_EXAMPLES", "300")), deadline=None, suppress_health_check=[HealthCheck.too_slow])
 
 
 @pytest.fixture

@@ -1,0 +1,112 @@
+# Offline routing eval for `doogle ask`. expected: a blueprint id, or null for "no confident match"
+# (out of scope: Doogle must answer with confidence none/low instead of guessing).
+# kind: direct | paraphrase | tricky | out_of_scope
+- {goal: "I want a cheap API for my side project", expected: solo-serverless-api, kind: direct}
+- {goal: "deploy my FastAPI app to Cloud Run", expected: solo-serverless-api, kind: direct}
+- {goal: "host a flask backend that scales to zero", expected: solo-serverless-api, kind: direct}
+- {goal: "put my express server online without managing servers", expected: solo-serverless-api, kind: paraphrase}
+- {goal: "run a docker container as a web service, pay only when used", expected: solo-serverless-api, kind: paraphrase}
+- {goal: "need a REST endpoint for my mobile app, low traffic", expected: solo-serverless-api, kind: paraphrase}
+- {goal: "serverless microservice in go", expected: solo-serverless-api, kind: direct}
+- {goal: "ship a node.js http service quickly and cheaply", expected: solo-serverless-api, kind: paraphrase}
+- {goal: "my hobby project needs a json api", expected: solo-serverless-api, kind: paraphrase}
+- {goal: "public url for a python web service from source code, no dockerfile", expected: solo-serverless-api, kind: paraphrase}
+- {goal: "deploy an ADK agent", expected: gemini-adk-service, kind: direct}
+- {goal: "build an AI agent with Gemini and deploy it", expected: gemini-adk-service, kind: direct}
+- {goal: "host my multi-agent system on google cloud", expected: gemini-adk-service, kind: direct}
+- {goal: "I made a chatbot with the agent development kit, how do I run it in production", expected: gemini-adk-service, kind: paraphrase}
+- {goal: "private LLM assistant with tool calling as a service", expected: gemini-adk-service, kind: paraphrase}
+- {goal: "deploy a gemini powered agent backend on cloud run", expected: gemini-adk-service, kind: tricky}
+- {goal: "run my function-calling bot on vertex ai", expected: gemini-adk-service, kind: paraphrase}
+- {goal: "an assistant that answers customer questions using gemini, deployed securely", expected: gemini-adk-service, kind: paraphrase}
+- {goal: "collect webhook data into a google sheet", expected: workspace-sheet-webhook, kind: direct}
+- {goal: "log form submissions to a spreadsheet", expected: workspace-sheet-webhook, kind: direct}
+- {goal: "apps script web app that receives POST requests", expected: workspace-sheet-webhook, kind: direct}
+- {goal: "replace zapier with something free that writes rows to sheets", expected: workspace-sheet-webhook, kind: paraphrase}
+- {goal: "no-code internal tool for my team to track orders in google workspace", expected: workspace-sheet-webhook, kind: paraphrase}
+- {goal: "send stripe events into a spreadsheet", expected: workspace-sheet-webhook, kind: paraphrase}
+- {goal: "automate saving github notifications to google sheets", expected: workspace-sheet-webhook, kind: paraphrase}
+- {goal: "receive typeform responses in a sheet without a server", expected: workspace-sheet-webhook, kind: tricky}
+- {goal: "excel-like log of incoming events from my IoT device", expected: workspace-sheet-webhook, kind: paraphrase}
+- {goal: "web app with login and a database for my startup MVP", expected: firebase-auth-mvp, kind: direct}
+- {goal: "firebase hosting plus authentication and firestore", expected: firebase-auth-mvp, kind: direct}
+- {goal: "let users sign up and save notes in my react app", expected: firebase-auth-mvp, kind: paraphrase}
+- {goal: "launch a small saas website with google sign-in", expected: firebase-auth-mvp, kind: paraphrase}
+- {goal: "static website with user accounts", expected: firebase-auth-mvp, kind: paraphrase}
+- {goal: "I need sign in with email and password and a place to store user data", expected: firebase-auth-mvp, kind: paraphrase}
+- {goal: "frontend-only single page app that needs a backend database and auth", expected: firebase-auth-mvp, kind: tricky}
+- {goal: "host my vue site for free on web.app with logins", expected: firebase-auth-mvp, kind: paraphrase}
+- {goal: "move my gemini prototype from ai studio to production", expected: ai-studio-to-vertex, kind: direct}
+- {goal: "switch from a Gemini API key to Vertex AI", expected: ai-studio-to-vertex, kind: direct}
+- {goal: "migrate google-genai code from AI Studio to Vertex with IAM", expected: ai-studio-to-vertex, kind: direct}
+- {goal: "stop using API keys for gemini, use service accounts instead", expected: ai-studio-to-vertex, kind: paraphrase}
+- {goal: "graduate my aistudio app to enterprise grade", expected: ai-studio-to-vertex, kind: paraphrase}
+- {goal: "set up application default credentials for gemini on vertex", expected: ai-studio-to-vertex, kind: paraphrase}
+- {goal: "my gemini api key leaked, how do I move to a keyless setup", expected: ai-studio-to-vertex, kind: tricky}
+- {goal: "need data residency and quotas for my gemini app, currently using ai studio", expected: ai-studio-to-vertex, kind: tricky}
+- {goal: "Gemini app works with an API key; make it production ready on Google Cloud", expected: ai-studio-to-vertex, kind: tricky}
+- {goal: "I need a backend for a chatbot agent", expected: gemini-adk-service, kind: tricky}
+- {goal: "cheap way to host an AI agent", expected: gemini-adk-service, kind: tricky}
+- {goal: "API that calls gemini", expected: gemini-adk-service, kind: tricky}
+- {goal: "website where users log in, hosted on firebase", expected: firebase-auth-mvp, kind: tricky}
+- {goal: "a webhook endpoint that stores events in a database with a REST API", expected: solo-serverless-api, kind: tricky}
+- {goal: "google sheet as a database for my form", expected: workspace-sheet-webhook, kind: tricky}
+- {goal: "Deploy Cloud Run service", expected: solo-serverless-api, kind: direct}
+- {goal: "CHEAP API!!!", expected: solo-serverless-api, kind: tricky}
+- {goal: "  firebase   mvp  ", expected: firebase-auth-mvp, kind: tricky}
+- {goal: "set up a BigQuery data warehouse for analytics", expected: null, kind: out_of_scope}
+- {goal: "create a GKE kubernetes cluster with autoscaling", expected: null, kind: out_of_scope}
+- {goal: "send marketing emails to my customers", expected: null, kind: out_of_scope}
+- {goal: "buy a domain name", expected: null, kind: out_of_scope}
+- {goal: "train a custom image classification model on TPUs", expected: null, kind: out_of_scope}
+- {goal: "android push notifications", expected: null, kind: out_of_scope}
+- {goal: "migrate my files from AWS S3 to cloud storage", expected: null, kind: out_of_scope}
+- {goal: "write terraform for my whole organisation", expected: null, kind: out_of_scope}
+- {goal: "delete my google cloud project", expected: null, kind: out_of_scope}
+- {goal: "what is the weather in Bangalore", expected: null, kind: out_of_scope}
+- {goal: "make me a sandwich", expected: null, kind: out_of_scope}
+- {goal: "set up a VPN between my office and GCP", expected: null, kind: out_of_scope}
+- {goal: "host a WordPress blog", expected: null, kind: out_of_scope}
+- {goal: "stream video to millions of users", expected: null, kind: out_of_scope}
+- {goal: "", expected: null, kind: out_of_scope}
+- {goal: "the and of to", expected: null, kind: out_of_scope}
+- {goal: "configure Google Analytics 4 for my site", expected: null, kind: out_of_scope}
+- {goal: "schedule a nightly cron job that backs up my Cloud SQL database", expected: null, kind: out_of_scope}
+# --- second batch, written as real users phrase things (forum-style), before any routing changes
+- {goal: "how do I get my python script online so my friends can hit it with requests", expected: solo-serverless-api, kind: paraphrase}
+- {goal: "cheapest way to run a tiny backend on gcp", expected: solo-serverless-api, kind: paraphrase}
+- {goal: "my discord bot webhook handler needs to live somewhere", expected: solo-serverless-api, kind: tricky}
+- {goal: "containerize and host my spring boot service", expected: solo-serverless-api, kind: paraphrase}
+- {goal: "I built a customer support agent in python with google adk, now what", expected: gemini-adk-service, kind: paraphrase}
+- {goal: "deploy langchain-style agent that uses gemini 2.5 on google cloud", expected: gemini-adk-service, kind: tricky}
+- {goal: "get my vertex ai agent behind authentication", expected: gemini-adk-service, kind: tricky}
+- {goal: "my boss wants every lead from our website form in a google sheet", expected: workspace-sheet-webhook, kind: paraphrase}
+- {goal: "glue between my shopify store and a spreadsheet", expected: workspace-sheet-webhook, kind: paraphrase}
+- {goal: "lightweight automation in google workspace triggered by http", expected: workspace-sheet-webhook, kind: paraphrase}
+- {goal: "need user registration and a nosql db for a hackathon project", expected: firebase-auth-mvp, kind: paraphrase}
+- {goal: "quick prototype web app where people can log in with google", expected: firebase-auth-mvp, kind: tricky}
+- {goal: "next.js front end needs auth", expected: firebase-auth-mvp, kind: tricky}
+- {goal: "security team says no more api keys in our gemini service", expected: ai-studio-to-vertex, kind: paraphrase}
+- {goal: "we hit the free tier rate limits on ai studio, want enterprise quotas", expected: ai-studio-to-vertex, kind: paraphrase}
+- {goal: "use workload identity instead of GEMINI_API_KEY", expected: ai-studio-to-vertex, kind: tricky}
+- {goal: "set up cloud monitoring dashboards and alerts", expected: null, kind: out_of_scope}
+- {goal: "build an ios app", expected: null, kind: out_of_scope}
+- {goal: "cost of compute engine VMs", expected: null, kind: out_of_scope}
+- {goal: "I want to learn google cloud", expected: null, kind: out_of_scope}
+# --- third batch: held out. Written after the v1.2 routing changes and NOT used for tuning.
+- {goal: "I need an HTTP backend for my weekend app that costs nothing when idle", expected: solo-serverless-api, kind: held_out}
+- {goal: "publish my rust web server", expected: solo-serverless-api, kind: held_out}
+- {goal: "deploy a tool-using gemini agent written with adk to my gcp project", expected: gemini-adk-service, kind: held_out}
+- {goal: "productionize my AI assistant built on the agent development kit", expected: gemini-adk-service, kind: held_out}
+- {goal: "pipe zap data into a google spreadsheet via apps script", expected: workspace-sheet-webhook, kind: held_out}
+- {goal: "capture survey answers in sheets from an external form tool", expected: workspace-sheet-webhook, kind: held_out}
+- {goal: "users should be able to create an account and save their todo list on my site", expected: firebase-auth-mvp, kind: held_out}
+- {goal: "firestore backed web app with google login", expected: firebase-auth-mvp, kind: held_out}
+- {goal: "move our genai app off the developer api key onto vertex", expected: ai-studio-to-vertex, kind: held_out}
+- {goal: "compliance wants IAM controlled access to gemini instead of keys", expected: ai-studio-to-vertex, kind: held_out}
+- {goal: "set up cloud armor waf rules", expected: null, kind: held_out}
+- {goal: "build a data pipeline from pub/sub to bigquery", expected: null, kind: held_out}
+- {goal: "host a minecraft server", expected: null, kind: held_out}
+- {goal: "translate my app into hindi", expected: null, kind: held_out}
+- {goal: "manage dns records for my company", expected: null, kind: held_out}
+- {goal: "speech to text for call recordings", expected: null, kind: held_out}

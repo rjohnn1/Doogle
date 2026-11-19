@@ -55,3 +55,14 @@ include = ["src", "blueprints", "tests", "docs", "scripts", "README.md", "CONTRI
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.mutmut]
+# Mutation testing of the safety-critical modules: `pip install mutmut && mutmut run`.
+source_paths = ["src/doogle"]
+do_not_mutate = ["src/doogle/cli.py", "src/doogle/docs.py", "src/doogle/__init__.py", "src/doogle/__main__.py"]
+also_copy = ["blueprints", "docs", ".github", "demo", "scripts", "README.md", "CONTRIBUTING.md",
+             "OPERATING_GUIDE.md", "CHANGELOG.md", "CODE_OF_CONDUCT.md", "SECURITY.md", "SUPPORT.md",
+             "GOVERNANCE.md", "LICENSE", ".gitignore"]
+pytest_add_cli_args_test_selection = ["tests/"]
+pytest_add_cli_args = ["-q", "-p", "no:cacheprovider", "--deselect", "tests/test_hardening.py::test_real_sigint_mid_step_via_cli",
+                       "--deselect", "tests/test_hardening.py::test_concurrent_writers_never_lose_runs"]

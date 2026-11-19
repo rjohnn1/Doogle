@@ -427,6 +427,14 @@ def cmd_ask(args, out: Out) -> int:
         out.line("Try: doogle list, or describe it with product words (API, agent, spreadsheet, webhook).")
         return 0
     rec = cat.get(result["recommendation"])
+    if result.get("not_covered"):
+        out.line("No shipped blueprint covers: " + ", ".join(result["not_covered"])
+                 + ". Propose one with a 'New blueprint' issue.")
+    if result["confidence"] == "low":
+        out.line(f"No confident match. Weak candidate: {rec.id}  ({rec.name})  [{result['mode']}, confidence: low]")
+        out.line(f"  {rec.tagline}")
+        out.line("  Check 'doogle explain " + rec.id + "' before relying on it, or rephrase the goal.")
+        return 0
     out.line(f"Recommended: {rec.id}  ({rec.name})  [{result['mode']}, confidence: {result['confidence']}]")
     out.line(f"  {rec.tagline}")
     if result.get("ai_reason"):
