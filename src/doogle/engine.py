@@ -16,6 +16,7 @@ Design rules (see README "Safety rules"):
 from __future__ import annotations
 
 import contextlib
+import difflib
 import json
 import os
 import re
@@ -431,10 +432,16 @@ class Catalog:
         if bp_id in self.errors:
             raise BlueprintValidationError(bp_id, self.errors[bp_id])
         known = ", ".join(sorted(self.blueprints)) or "(none)"
-        raise BlueprintNotFound(f"unknown blueprint '{bp_id}'. Available: {known}")
+        raise BlueprintNotFound(f"unknown blueprint '{bp_id}'.{_did_you_mean(bp_id, self.blueprints)} "
+                                f"Available: {known}")
 
     def __iter__(self) -> Iterator[Blueprint]:
         return iter(self.blueprints.values())
+
+
+def _did_you_mean(word: str, choices: Iterable[str]) -> str:
+    close = difflib.get_close_matches(word, list(choices), n=1, cutoff=0.6)
+    return f" Did you mean '{close[0]}'?" if close else ""
 
 
 # --------------------------------------------------------------------------- variables & rendering
@@ -468,8 +475,10 @@ def resolve_variables(bp: Blueprint,
     provided = dict(provided or {})
     unknown = set(provided) - {v.key for v in bp.variables}
     if unknown:
-        raise VariableError(f"unknown variable(s) for '{bp.id}': {sorted(unknown)}. "
-                            f"Declared: {[v.key for v in bp.variables]}")
+        declared = [v.key for v in bp.variables]
+        tips = "".join(_did_you_mean(u, declared) for u in sorted(unknown))
+        raise VariableError(f"unknown variable(s) for '{bp.id}': {sorted(unknown)}.{tips} "
+                            f"Declared: {declared}")
     values: dict[str, str] = {}
     missing: list[Variable] = []
     for var in bp.variables:
@@ -880,6 +889,42 @@ def redact(text: str) -> str:
     return text
 
 
+# Known failure signatures -> one actionable next step. Matched against redacted output.
+FAILURE_HINTS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"do not currently have an active account|gcloud auth login|Reauthentication (is )?required"
+                r"|invalid_grant", re.I),
+     "gcloud is not logged in (or the login expired): run 'gcloud auth login', then resume."),
+    (re.compile(r"Failed to authenticate, have you run firebase login|firebase login", re.I),
+     "firebase is not logged in: run 'firebase login', then resume."),
+    (re.compile(r"clasp login|Could not read API credentials|not logged in", re.I),
+     "clasp is not logged in: run 'clasp login', then resume."),
+    (re.compile(r"BILLING_DISABLED|billing (account|is) (not|disabled)|Billing account .{0,80}not found"
+                r"|Billing must be enabled|requires billing|billing to be enabled", re.I),
+     "billing is not enabled on this project: link a billing account in the Cloud console, then resume."),
+    (re.compile(r"SERVICE_DISABLED|has not been used in project|API .* is disabled|it is disabled", re.I),
+     "a required API is not enabled yet (enabling can take a few minutes to propagate): wait, then resume."),
+    (re.compile(r"project .{0,80}(not found|does not exist)|NOT_FOUND: .*project|Unknown project", re.I),
+     "the project was not found: check project_id (the ID, not the display name) with 'gcloud projects list'."),
+    (re.compile(r"PERMISSION_DENIED|does not have (the )?permission|permission denied|"
+                r"(HTTP|Error|status|code)[ =:]*403\b|\(403\)|"
+                r"caller does not have permission", re.I),
+     "permission denied: the active account lacks a role on this project, or project_id is wrong. "
+     "Check 'gcloud auth list' and 'gcloud projects get-iam-policy <project_id>'."),
+    (re.compile(r"Quota exceeded|RESOURCE_EXHAUSTED", re.I),
+     "a quota was hit: check the quotas page for this project, or retry later."),
+]
+
+
+def diagnose(text: str | None) -> str | None:
+    """Return a one-line next step for a recognised failure, else None."""
+    if not text:
+        return None
+    for pattern, hint in FAILURE_HINTS:
+        if pattern.search(text):
+            return hint
+    return None
+
+
 def _tail(text: str, lines: int = 15) -> str:
     return redact("\n".join((text or "").strip().splitlines()[-lines:]))[-4000:]
 
@@ -1025,7 +1070,8 @@ class Executor:
         paused_manual = {s["id"] for s in run["steps"] if s.get("status") == "awaiting_manual"}
         for s in run["steps"]:
             if s.get("status") != "succeeded":
-                s.update(status="pending", exit_code=None, verify_status=None, output_tail=None, skip_reason=None)
+                s.update(status="pending", exit_code=None, verify_status=None, output_tail=None, skip_reason=None,
+                         hint=None)
         run.update(status="running", finished_at=None, resumed_at=utc_now())
         self.store.save_run(run)
         return self._execute(run, assume_manual_done=paused_manual)
@@ -1097,6 +1143,7 @@ class Executor:
         step["output_tail"] = _output(result)
         if result.returncode != 0:
             step["status"] = "failed"
+            step["hint"] = diagnose(step["output_tail"])
             step["finished_at"] = utc_now()
             self._emit("step_finished", step)
             return self._finish(run, "failed")
@@ -1108,6 +1155,7 @@ class Executor:
             step["verify_output_tail"] = _output(vres, 5)
             if not ok:
                 step["status"] = "verify_failed"
+                step["hint"] = diagnose(step["verify_output_tail"])
                 step["finished_at"] = utc_now()
                 self._emit("step_finished", step)
                 return self._finish(run, "failed")
@@ -1164,6 +1212,7 @@ class Executor:
                 t["finished_at"] = utc_now()
                 t["status"] = "succeeded" if res.returncode == 0 else "failed"
                 t["output_tail"] = _output(res, 5)
+                t["hint"] = diagnose(t["output_tail"]) if res.returncode else None
                 failures += res.returncode != 0
                 self.store.save_run(run)
                 self._emit("teardown_finished", t)

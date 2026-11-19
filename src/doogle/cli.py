@@ -157,6 +157,8 @@ def _print_run(out: Out, run: dict[str, Any]) -> None:
         if s["status"] in ("failed", "verify_failed") and s.get("output_tail"):
             for ln in s["output_tail"].splitlines()[-8:]:
                 out.line(f"      | {ln}")
+        if s["status"] in ("failed", "verify_failed") and s.get("hint"):
+            out.line(f"      hint: {s['hint']}")
     hr = " --approve-high-risk" if any(s["risk"] == "high" and s["status"] != "succeeded"
                                       for s in run["steps"]) else ""
     if run["status"] == "paused":
@@ -380,6 +382,11 @@ def cmd_teardown(args: argparse.Namespace, out: Out) -> int:
                 out.line(f"      -> {t['description']}")
             elif t["status"] == "skipped_not_created":
                 out.line(f"      -> {t.get('skip_reason')}")
+            elif t["status"] == "failed":
+                for ln in (t.get("output_tail") or "").splitlines()[-5:]:
+                    out.line(f"      | {ln}")
+                if t.get("hint"):
+                    out.line(f"      hint: {t['hint']}")
     return 0 if run["teardown_status"] in ("succeeded", "nothing_to_run") else 1
 
 

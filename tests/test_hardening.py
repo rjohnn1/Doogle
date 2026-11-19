@@ -613,6 +613,7 @@ def test_syntax_checker_captures_help_and_detects_unknown_commands(tmp_path):
     (fake_named / "firebase").chmod(0o755)
     old = os.environ["PATH"]
     os.environ["PATH"] = f"{fake_named}{os.pathsep}{old}"
+    mod.ENV = dict(mod.ENV, PATH=os.environ["PATH"])  # the script snapshots its env at import
     try:
         mod.help_text.cache_clear()
         assert mod.resolve_help("firebase", ["hosting:disabl"]) is None
@@ -620,3 +621,54 @@ def test_syntax_checker_captures_help_and_detects_unknown_commands(tmp_path):
     finally:
         os.environ["PATH"] = old
         mod.help_text.cache_clear()
+
+
+# --------------------------------------------------------------------------- UX: common mistakes
+
+
+@pytest.mark.parametrize("output,needle", [
+    ("ERROR: (gcloud.projects.describe) You do not currently have an active account selected.\n"
+     "Please run:\n\n  $ gcloud auth login", "gcloud auth login"),
+    ("Error: Failed to authenticate, have you run firebase login?", "firebase login"),
+    ("ERROR: (gcloud.services.enable) FAILED_PRECONDITION: Billing account for project '123' is not found. "
+     "Billing must be enabled for activation of service(s)", "billing"),
+    ("ERROR: (gcloud.run.deploy) PERMISSION_DENIED: Cloud Run Admin API has not been used in project 123 "
+     "before or it is disabled.", "api is not enabled"),
+    ("ERROR: (gcloud.projects.describe) NOT_FOUND: Project 'demo-proj-1' not found or permission denied",
+     "project was not found"),
+    ("ERROR: (gcloud.run.deploy) User [x] does not have permission to access namespaces instance", "permission"),
+    ("ERROR: (gcloud.services.enable) RESOURCE_EXHAUSTED: Quota exceeded", "quota"),
+])
+def test_failure_hints_recognise_common_errors(output, needle):
+    hint = E.diagnose(output)
+    assert hint and needle in hint.lower()
+
+
+@pytest.mark.parametrize("output", ["", None, "Deploying... done", "service doogle-api-403x created",
+                                    "Revision doogle-api-00403-abc is serving"])
+def test_failure_hints_do_not_fire_on_noise(output):
+    assert E.diagnose(output) is None
+
+
+def test_failed_step_records_and_prints_hint(capsys, tmp_path, monkeypatch):
+    bps = tmp_path / "bps"
+    write_bp_dir(bps, minimal_data())
+    monkeypatch.setattr(E, "check_tools", lambda tools, which=None: {t: "/x" for t in tools})
+    monkeypatch.setattr(E, "subprocess_runner", lambda argv, timeout: E.CommandResult(
+        1, "", "ERROR: You do not currently have an active account selected."))
+    code, out, _ = run_cli(capsys, "plan", "demo-bp", "--blueprints-dir", str(bps), "--var", "project_id=demo-project",
+                           "--apply", "--yes", "--approve-high-risk", "--state-dir", str(tmp_path / "st"))
+    assert code == 1 and "hint: gcloud is not logged in" in out
+    run = E.StateStore(E.resolve_state_path(str(tmp_path / "st"))).get("latest")
+    assert run["steps"][0]["hint"].startswith("gcloud is not logged in")
+
+
+def test_typos_get_did_you_mean(capsys, tmp_path):
+    bps = tmp_path / "bps"
+    write_bp_dir(bps, minimal_data())
+    code, _, err = run_cli(capsys, "explain", "demo-pb", "--blueprints-dir", str(bps))
+    assert code == 2 and "Did you mean 'demo-bp'?" in err
+    code, _, err = run_cli(capsys, "plan", "demo-bp", "--blueprints-dir", str(bps), "--var", "projectid=demo-project")
+    assert code == 2 and "Did you mean 'project_id'?" in err
+    code, _, err = run_cli(capsys, "explain", "zzzzzz", "--blueprints-dir", str(bps))
+    assert code == 2 and "Did you mean" not in err and "Available: demo-bp" in err
