@@ -31,12 +31,11 @@ dependencies = ["PyYAML>=6.0"]
 ai = ["google-genai>=1.0"]
 dev = ["pytest>=8.0", "build>=1.0", "hypothesis>=6.100", "pytest-cov>=5.0"]
 
-# TODO(maintainer): replace OWNER/REPO before publishing to PyPI.
 [project.urls]
-Homepage = "https://github.com/OWNER/REPO"
-Documentation = "https://github.com/OWNER/REPO#readme"
-Issues = "https://github.com/OWNER/REPO/issues"
-Changelog = "https://github.com/OWNER/REPO/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/rjohnn1/Doogle"
+Documentation = "https://github.com/rjohnn1/Doogle#readme"
+Issues = "https://github.com/rjohnn1/Doogle/issues"
+Changelog = "https://github.com/rjohnn1/Doogle/blob/main/CHANGELOG.md"
 
 [project.scripts]
 doogle = "doogle.cli:main"

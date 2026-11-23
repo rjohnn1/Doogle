@@ -12,7 +12,7 @@ how a blueprint earns trust.
 | Maintainer | Listed below and in `.github/CODEOWNERS` | Merge PRs, triage, cut releases, manage labels |
 | Lead maintainer | One maintainer, listed below | Final call when consensus fails; security contact; trademark/naming questions |
 
-Current maintainers: <!-- TODO(maintainer): list GitHub handles here --> `@OWNER` (lead).
+Current maintainers: `@rjohnn1` (lead).
 
 Contributors who make regular, high-quality contributions (for example several merged blueprints
 or reviews over a few months) may be invited to become maintainers by consensus of existing

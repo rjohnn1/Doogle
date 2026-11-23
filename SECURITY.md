@@ -5,8 +5,8 @@ Doogle runs cloud CLI commands with your credentials, so we take its safety guar
 ## Reporting a vulnerability
 
 **Please do not open a public issue.** Report privately through GitHub's
-[private vulnerability reporting](https://github.com/OWNER/REPO/security/advisories/new)
-(Security tab > "Report a vulnerability"). <!-- TODO(maintainer): enable it under Settings > Code security > Private vulnerability reporting, and replace OWNER/REPO. -->
+[private vulnerability reporting](https://github.com/rjohnn1/Doogle/security/advisories/new)
+(Security tab > "Report a vulnerability"). Enable private vulnerability reporting under Settings > Code security if it is not already on.
 
 Include what you found, how to reproduce it (ideally with `doogle plan` or stub CLIs, no real
 cloud project needed), the impact, and the Doogle version. We aim to acknowledge within

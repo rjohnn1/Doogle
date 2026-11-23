@@ -19,7 +19,8 @@ from .engine import Blueprint, Catalog
 GALLERY_START = "<!-- doogle:gallery:start -->"
 GALLERY_END = "<!-- doogle:gallery:end -->"
 MATRIX_PATH = Path("docs") / "DECISION_MATRIX.md"
-PLACEHOLDER_REPO = "https://github.com/OWNER/REPO"
+DEFAULT_REPO = "https://github.com/rjohnn1/Doogle"
+PLACEHOLDER_REPO = DEFAULT_REPO  # default used when --repo-url / DOOGLE_REPO_URL are unset
 REPO_URL_ENV = "DOOGLE_REPO_URL"
 BADGE_COLOR = "2ea44f"  # neutral green; deliberately not a Google brand colour
 
@@ -126,8 +127,13 @@ def write(desired: dict[Path, str]) -> list[Path]:
 # --------------------------------------------------------------------------- share
 
 
+def _is_placeholder_repo(url: str) -> bool:
+    """True only for a leftover unconfigured URL, not for the published default."""
+    return "github.com/OWNER/REPO" in url
+
+
 def repo_url(explicit: str | None = None) -> str:
-    return (explicit or os.environ.get(REPO_URL_ENV) or PLACEHOLDER_REPO).rstrip("/")
+    return (explicit or os.environ.get(REPO_URL_ENV) or DEFAULT_REPO).rstrip("/")
 
 
 def _shields(text: str) -> str:
@@ -143,4 +149,4 @@ def share_snippet(bp: Blueprint, url: str) -> dict[str, Any]:
              "planned as a dry run first and with a recorded teardown. Doogle is an independent "
              "community project, not affiliated with or endorsed by Google LLC.")
     return {"blueprint_id": bp.id, "link": link, "badge_url": badge, "badge_markdown": badge_md,
-            "markdown": f"{badge_md}\n\n{blurb}\n", "placeholder_repo": url == PLACEHOLDER_REPO}
+            "markdown": f"{badge_md}\n\n{blurb}\n", "placeholder_repo": _is_placeholder_repo(url)}

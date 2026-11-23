@@ -146,6 +146,6 @@ Rules for agents:
 ## 6. Publishing this repository
 
 ```bash
-git remote add origin https://github.com/OWNER/REPO.git
+git remote add origin https://github.com/rjohnn1/Doogle.git
 git push -u origin main
 ```

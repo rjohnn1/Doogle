@@ -4,7 +4,7 @@
 
 **Do the Google: say what you want to build, get the smallest Google stack that fits, see every command before it runs, and keep a clean undo.**
 
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![CI](https://github.com/rjohnn1/Doogle/actions/workflows/ci.yml/badge.svg)](https://github.com/rjohnn1/Doogle/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](pyproject.toml)
 [![Telemetry: none](https://img.shields.io/badge/telemetry-none-brightgreen)](#privacy-no-telemetry)
@@ -15,11 +15,18 @@
 
 </div>
 
-Google's builder ecosystem (Cloud Run, Firebase, Workspace and Apps Script, AI Studio, Vertex AI,
-the Agent Development Kit, and more) has overlapping products and scattered setup guides. Doogle is
-a curated, opinionated **decision guide plus dry-run-first setup blueprints** for the most common
-builder workflows. It is not a magic wrapper for every Google product; it goes deep and reliable
-on a small set of patterns and makes adding more a one-folder pull request.
+Doogle — **Do the Google** — is a unified build, bus and management CLI for the Google
+ecosystem (Cloud Run, Firebase, Workspace and Apps Script, AI Studio, Vertex AI, the Agent
+Development Kit, and more). Those products overlap and their setup guides are scattered;
+Doogle is a curated, opinionated **decision guide plus dry-run-first setup blueprints** for the
+most common builder workflows. It is not a magic wrapper for every Google product; it goes
+deep and reliable on a small set of patterns and makes adding more a one-folder pull request.
+
+> **Status (1.2.0rc1).** This is a release candidate, currently in private review. All five
+> shipped blueprints are `syntax-checked` against recorded CLI versions; none have been run
+> end-to-end against a live Google Cloud project yet. Linux is the well-tested platform;
+> Windows and macOS are not fully verified. Invited reviewers: start with
+> [docs/INTRODUCTION.md](docs/INTRODUCTION.md). Evidence: [docs/QUALITY_REPORT.md](docs/QUALITY_REPORT.md).
 
 ```text
 $ doogle ask "add login and a database to my react web app"
@@ -64,13 +71,13 @@ Requires Python 3.10+. Cloud tools (`gcloud`, `firebase`, `clasp`) are only need
 Install it as a tool (recommended), straight from GitHub:
 
 ```bash
-pipx install "git+https://github.com/OWNER/REPO.git"      # or: pip install "git+https://github.com/OWNER/REPO.git"
+pipx install "git+https://github.com/rjohnn1/Doogle.git"      # or: pip install "git+https://github.com/rjohnn1/Doogle.git"
 ```
 
 or work from a clone (needed to contribute blueprints):
 
 ```bash
-git clone https://github.com/OWNER/REPO.git doogle && cd doogle
+git clone https://github.com/rjohnn1/Doogle.git doogle && cd doogle
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"          # add ,ai for optional Gemini routing: ".[ai,dev]"
 ```
@@ -153,12 +160,13 @@ Use `--json` everywhere, check exit codes, plan before apply, and never pass
 
 ## Built something with Doogle?
 
-`doogle share <blueprint-id> --repo-url https://github.com/OWNER/REPO` prints a badge and a one-line
-credit for your README. Entirely optional; we would love to see it in
-[Discussions](https://github.com/OWNER/REPO/discussions).
+`doogle share <blueprint-id>` prints a badge and a one-line credit for your README (override the
+repo with `--repo-url` if you need to). Entirely optional; we would love to see it in
+[Discussions](https://github.com/rjohnn1/Doogle/discussions).
 
 ## Contributing and community
 
+* Invited reviewers: [docs/INTRODUCTION.md](docs/INTRODUCTION.md) is the short brief (what it is, a 5-minute try, what feedback helps, known limits).
 * Add a blueprint in one pull request: [CONTRIBUTING.md](CONTRIBUTING.md) has a "first blueprint in 15 minutes" path.
 * Found an outdated flag or broken step? Open a **Blueprint drift or bug** issue.
 * [Code of Conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md) · [Support](SUPPORT.md) · [Governance](GOVERNANCE.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md)

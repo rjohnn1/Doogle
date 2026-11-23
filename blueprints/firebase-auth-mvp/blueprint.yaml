@@ -3,7 +3,7 @@ id: firebase-auth-mvp
 name: Firebase Auth MVP (Hosting + Authentication + Firestore)
 category: web
 tagline: Launch a small web MVP with sign-in, a Firestore database locked down by security rules, and global static hosting on a free web.app domain.
-maintainer: "@OWNER"  # TODO(maintainer): replace with your GitHub handle before publishing
+maintainer: "@rjohnn1"
 last_verified: "2026-11-19"
 verification_status: syntax-checked
 verified_versions:

@@ -3,7 +3,7 @@ id: gemini-adk-service
 name: Gemini ADK Agent Service on Cloud Run + Vertex AI
 category: ai
 tagline: Deploy an Agent Development Kit (ADK) agent backed by Gemini on Vertex AI as a private Cloud Run service with its own least-privilege identity.
-maintainer: "@OWNER"  # TODO(maintainer): replace with your GitHub handle before publishing
+maintainer: "@rjohnn1"
 last_verified: "2026-11-19"
 verification_status: syntax-checked
 verified_versions:

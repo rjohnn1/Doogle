@@ -3,7 +3,7 @@ id: ai-studio-to-vertex
 name: Graduate a Gemini Prototype from AI Studio to Vertex AI
 category: ai
 tagline: Move a Gemini app from an AI Studio API key to Vertex AI with IAM, Application Default Credentials and a least-privilege runtime service account, with no code rewrite.
-maintainer: "@OWNER"  # TODO(maintainer): replace with your GitHub handle before publishing
+maintainer: "@rjohnn1"
 last_verified: "2026-11-19"
 verification_status: syntax-checked
 verified_versions:

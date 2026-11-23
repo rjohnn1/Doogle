@@ -33,7 +33,7 @@ Move a Gemini app from an AI Studio API key to Vertex AI with IAM, Application D
 
 **Cost:** Vertex AI bills Gemini per input and output token, by model, with no free model quota, and needs a billing account. Enabling the API and creating the service account cost nothing by themselves. Compare the official Vertex AI generative AI pricing page with Gemini API pricing and set a budget alert before switching traffic.
 
-**Verified:** syntax-checked on 2026-11-19 (gcloud 594.0.0, python 3.13.5). Maintainer: @OWNER
+**Verified:** syntax-checked on 2026-11-19 (gcloud 594.0.0, python 3.13.5). Maintainer: @rjohnn1
 
 Try it: `doogle explain ai-studio-to-vertex` then `doogle plan ai-studio-to-vertex`
 
@@ -56,7 +56,7 @@ Deploy an Agent Development Kit (ADK) agent backed by Gemini on Vertex AI as a p
 
 **Cost:** Gemini on Vertex AI is billed per input and output token and varies a lot by model; agents that loop or call tools can use many tokens per request. Cloud Run, Cloud Build and Artifact Registry have free tiers and then bill by usage. There is no free model quota on Vertex AI, so set a billing budget alert and check the official Vertex AI generative AI pricing page.
 
-**Verified:** syntax-checked on 2026-11-19 (gcloud 594.0.0, python 3.13.5). Maintainer: @OWNER
+**Verified:** syntax-checked on 2026-11-19 (gcloud 594.0.0, python 3.13.5). Maintainer: @rjohnn1
 
 Try it: `doogle explain gemini-adk-service` then `doogle plan gemini-adk-service`
 
@@ -80,7 +80,7 @@ Ship a containerised HTTP API from source to Cloud Run with scale-to-zero, no Do
 
 **Cost:** Cloud Run, Cloud Build and Artifact Registry each have a free tier that typically covers a low-traffic side project; usage beyond it is billed per request, CPU and memory time, build minutes and stored image size. A billing account must be linked to the project. Check the official Cloud Run pricing page and set a budget alert before going public.
 
-**Verified:** syntax-checked on 2026-11-19 (gcloud 594.0.0, python 3.13.5). Maintainer: @OWNER
+**Verified:** syntax-checked on 2026-11-19 (gcloud 594.0.0, python 3.13.5). Maintainer: @rjohnn1
 
 Try it: `doogle explain solo-serverless-api` then `doogle plan solo-serverless-api`
 
@@ -104,7 +104,7 @@ Launch a small web MVP with sign-in, a Firestore database locked down by securit
 
 **Cost:** Hosting, Authentication and Firestore all have no-cost quotas on the Spark plan that usually cover an MVP; usage beyond them (storage, transfer, document reads and writes, some sign-in methods such as phone/SMS) needs the pay-as-you-go Blaze plan. Check the official Firebase pricing page and set a budget alert before launch.
 
-**Verified:** syntax-checked on 2026-11-19 (firebase-tools 15.37.0, gcloud 594.0.0, python 3.13.5). Maintainer: @OWNER
+**Verified:** syntax-checked on 2026-11-19 (firebase-tools 15.37.0, gcloud 594.0.0, python 3.13.5). Maintainer: @rjohnn1
 
 Try it: `doogle explain firebase-auth-mvp` then `doogle plan firebase-auth-mvp`
 
@@ -127,6 +127,6 @@ Turn a new Google Sheet into a webhook receiver with a container-bound Apps Scri
 
 **Cost:** No additional charge for consumer Google accounts or Workspace plans; usage is limited by Apps Script quotas (executions, runtime, URL fetch calls) which are lower on consumer accounts than on Workspace accounts. Check the official Apps Script quotas page for current limits.
 
-**Verified:** syntax-checked on 2026-11-19 (@google/clasp 3.4.1, python 3.13.5). Maintainer: @OWNER
+**Verified:** syntax-checked on 2026-11-19 (@google/clasp 3.4.1, python 3.13.5). Maintainer: @rjohnn1
 
 Try it: `doogle explain workspace-sheet-webhook` then `doogle plan workspace-sheet-webhook`

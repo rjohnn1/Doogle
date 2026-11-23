@@ -3,7 +3,7 @@ id: workspace-sheet-webhook
 name: Google Sheet + Apps Script Webhook
 category: workspace
 tagline: Turn a new Google Sheet into a webhook receiver with a container-bound Apps Script web app, managed from your terminal with clasp.
-maintainer: "@OWNER"  # TODO(maintainer): replace with your GitHub handle before publishing
+maintainer: "@rjohnn1"
 last_verified: "2026-11-19"
 verification_status: syntax-checked
 verified_versions:

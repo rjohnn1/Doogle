@@ -89,8 +89,8 @@ error strings. Those are not safety paths.
 **Low (UX)**
 11. **The fresh-user quickstart failed on its last line.** `YOUR_PROJECT_ID` fails the
     lowercase pattern, and the error printed a regex. *Fix:* a placeholder-aware message, a
-    working example ID, and pipx/pip install instructions. Not fixed: the `OWNER/REPO`
-    placeholder that the maintainer must replace.
+    working example ID, and pipx/pip install instructions. The `OWNER/REPO`
+    placeholder was later replaced with `rjohnn1/Doogle` before the private review push.
 12. **Error messages for common mistakes.** Ten were reviewed: id typo, variable typo, missing
     variable, no gcloud, not logged in, wrong or non-existent project, bad pattern, no runs,
     corrupt state, non-interactive without `--yes`. Added "Did you mean …?", plus `hint:` lines

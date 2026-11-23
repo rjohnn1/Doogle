@@ -3,7 +3,7 @@ id: solo-serverless-api
 name: Solo Serverless API on Cloud Run
 category: compute
 tagline: Ship a containerised HTTP API from source to Cloud Run with scale-to-zero, no Dockerfile required.
-maintainer: "@OWNER"  # TODO(maintainer): replace with your GitHub handle before publishing
+maintainer: "@rjohnn1"
 last_verified: "2026-11-19"
 verification_status: syntax-checked
 verified_versions:

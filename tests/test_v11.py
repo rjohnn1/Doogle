@@ -278,14 +278,16 @@ def test_share_snippet(capsys, monkeypatch):
     monkeypatch.delenv(D.REPO_URL_ENV, raising=False)
     code, out, _ = run_cli(capsys, "share", "solo-serverless-api", "--json")
     s = json.loads(out)
-    assert code == 0 and s["placeholder_repo"] is True
+    assert code == 0 and s["placeholder_repo"] is False
     assert s["badge_url"] == ("https://img.shields.io/badge/built%20with-doogle%3A%20solo--serverless--api-"
                               + D.BADGE_COLOR)
-    assert s["link"] == "https://github.com/OWNER/REPO/tree/main/blueprints/solo-serverless-api"
+    assert s["link"] == "https://github.com/rjohnn1/Doogle/tree/main/blueprints/solo-serverless-api"
     assert "not affiliated with or endorsed by Google LLC" in s["markdown"]
     monkeypatch.setenv(D.REPO_URL_ENV, "https://github.com/acme/doogle/")
     code, out, err = run_cli(capsys, "share", "firebase-auth-mvp")
     assert "https://github.com/acme/doogle/tree/main/blueprints/firebase-auth-mvp" in out and "placeholder" not in err
+    code, out, err = run_cli(capsys, "share", "solo-serverless-api", "--repo-url", "https://github.com/OWNER/REPO")
+    assert code == 0 and "placeholder" in err
     code, out, _ = run_cli(capsys, "share", "nope")
     assert code == 2
 
@@ -300,7 +302,7 @@ REQUIRED_FILES = [
     ".github/ISSUE_TEMPLATE/config.yml", ".github/PULL_REQUEST_TEMPLATE.md", ".github/CODEOWNERS",
     ".github/dependabot.yml", ".github/workflows/ci.yml", ".github/workflows/codeql.yml",
     ".github/workflows/freshness.yml", ".github/labels.yml", "docs/LABELS.md", "docs/DECISION_MATRIX.md",
-    "docs/LAUNCH_PLAYBOOK.md", "docs/ROADMAP.md", "demo/demo.tape", "demo/README.md",
+    "docs/LAUNCH_PLAYBOOK.md", "docs/ROADMAP.md", "docs/INTRODUCTION.md", "demo/demo.tape", "demo/README.md",
     "scripts/check_cli_syntax.py", "blueprints/_template/blueprint.yaml",
 ]
 
@@ -325,14 +327,17 @@ def test_ci_checks_docs_and_freshness_workflow_is_scheduled():
 
 def test_code_of_conduct_and_placeholders():
     coc = (REPO / "CODE_OF_CONDUCT.md").read_text()
-    assert "Contributor Covenant" in coc and "version 2.1" in coc and "MAINTAINER: INSERT CONTACT METHOD" in coc
+    assert "Contributor Covenant" in coc and "version 2.1" in coc
+    assert "MAINTAINER: INSERT CONTACT METHOD" not in coc
+    assert "https://github.com/rjohnn1/Doogle/security/advisories/new" in coc
 
 
 def test_readme_privacy_badges_and_gallery():
     readme = (REPO / "README.md").read_text()
     assert "no telemetry" in readme.lower()
     assert "Nothing leaves your machine except the commands you approve" in readme
-    assert "actions/workflows/ci.yml/badge.svg" in readme and "OWNER/REPO" in readme
+    assert "actions/workflows/ci.yml/badge.svg" in readme and "rjohnn1/Doogle" in readme
+    assert "OWNER/REPO" not in readme
     assert D.GALLERY_START in readme and "firebase-auth-mvp" in readme
 
 

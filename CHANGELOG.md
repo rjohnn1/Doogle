@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- Repository URL and maintainer placeholders now use `rjohnn1/Doogle` and `@rjohnn1`.
+- Code of Conduct enforcement contact points at GitHub private vulnerability reporting
+  (no personal email).
+- README states 1.2.0rc1 review status: blueprints are `syntax-checked`, not yet live-verified.
+- Added `docs/INTRODUCTION.md` for invited reviewers.
+
 ## [1.2.0rc1] - 2026-11-19
 
 Hardening release candidate. See `docs/QUALITY_REPORT.md` for the evidence behind every item.
@@ -110,7 +117,7 @@ Hardening release candidate. See `docs/QUALITY_REPORT.md` for the evidence behin
   Gemini), `doctor`, `validate`; `.doogle/state.json` run records; strict schema validator;
   blueprints `solo-serverless-api`, `gemini-adk-service`, `workspace-sheet-webhook`.
 
-[Unreleased]: https://github.com/OWNER/REPO/compare/v1.2.0rc1...HEAD
-[1.2.0rc1]: https://github.com/OWNER/REPO/compare/v1.1.0...v1.2.0rc1
-[1.1.0]: https://github.com/OWNER/REPO/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/OWNER/REPO/releases/tag/v1.0.0
+[Unreleased]: https://github.com/rjohnn1/Doogle/compare/v1.2.0rc1...HEAD
+[1.2.0rc1]: https://github.com/rjohnn1/Doogle/compare/v1.1.0...v1.2.0rc1
+[1.1.0]: https://github.com/rjohnn1/Doogle/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/rjohnn1/Doogle/releases/tag/v1.0.0

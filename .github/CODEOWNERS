@@ -1,6 +1,5 @@
-# TODO(maintainer): replace @OWNER with real GitHub users or teams before publishing.
 # Reviews from code owners are requested automatically on pull requests.
-*                     @OWNER
-/src/doogle/          @OWNER
-/blueprints/          @OWNER
-/.github/             @OWNER
+*                     @rjohnn1
+/src/doogle/          @rjohnn1
+/blueprints/          @rjohnn1
+/.github/             @rjohnn1

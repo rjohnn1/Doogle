@@ -2,7 +2,7 @@
 
 | You want to... | Go to |
 |---|---|
-| Ask "how do I...?" or "which blueprint fits?" | [GitHub Discussions > Q&A](https://github.com/OWNER/REPO/discussions) |
+| Ask "how do I...?" or "which blueprint fits?" | [GitHub Discussions > Q&A](https://github.com/rjohnn1/Doogle/discussions) |
 | Share something you built | Discussions > Show and tell |
 | Report an outdated flag or broken blueprint step | Issue: **Blueprint drift or bug** |
 | Report a CLI/engine bug | Issue: **Bug report** |

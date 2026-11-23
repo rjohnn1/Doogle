@@ -20,7 +20,7 @@ afterwards. Every tactic here is opt-in for the audience and honest about what D
 
 ## 1. Before launch checklist
 
-- [ ] Replace every `OWNER/REPO`, `@OWNER` and `[MAINTAINER: ...]` placeholder (see below)
+- [x] Replace every `OWNER/REPO`, `@OWNER` and `[MAINTAINER: ...]` placeholder (now `rjohnn1/Doogle` / `@rjohnn1`; Code of Conduct contact is GitHub private vulnerability reporting)
 - [ ] Repository settings: description, topics (`google-cloud`, `firebase`, `gemini`, `cloud-run`,
       `apps-script`, `cli`, `developer-tools`), website link, Discussions on, private
       vulnerability reporting on, branch protection on `main` requiring CI

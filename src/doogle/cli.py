@@ -517,7 +517,7 @@ def cmd_share(args: argparse.Namespace, out: Out) -> int:
         return 0
     out.line(snippet["markdown"])
     if snippet["placeholder_repo"]:
-        out.err(f"note: links use the placeholder {D.PLACEHOLDER_REPO}; pass --repo-url or set ${D.REPO_URL_ENV}.")
+        out.err(f"note: links use an unconfigured placeholder repo URL; pass --repo-url or set ${D.REPO_URL_ENV}.")
     return 0
 
 
@@ -621,7 +621,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("share", parents=[common], help="print a markdown badge + blurb for a blueprint")
     s.add_argument("blueprint")
-    s.add_argument("--repo-url", help=f"repository URL for links (default: ${D.REPO_URL_ENV} or a placeholder)")
+    s.add_argument("--repo-url", help=f"repository URL for links (default: ${D.REPO_URL_ENV} or {D.DEFAULT_REPO})")
     s.set_defaults(func=cmd_share)
 
     s = sub.add_parser("validate", parents=[common], help="strictly validate every blueprint (used by CI)")
