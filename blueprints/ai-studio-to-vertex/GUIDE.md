@@ -62,18 +62,21 @@ from google import genai
 
 # Before (AI Studio): client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 client = genai.Client(vertexai=True, project="YOUR_PROJECT_ID", location="global")
-resp = client.models.generate_content(model="gemini-2.5-flash", contents="Say hello in five words.")
+resp = client.models.generate_content(model="gemini-4-hydrogen", contents="Say hello in five words.")
 print(resp.text)
 ```
 
 Smoke test from your terminal (uses ADC; `pip install google-genai` first):
 
 ```bash
-python -c "from google import genai; c=genai.Client(); print(c.models.generate_content(model='gemini-2.5-flash', contents='ping').text)"
+python -c "from google import genai; c=genai.Client(); print(c.models.generate_content(model='gemini-4-hydrogen', contents='ping').text)"
 ```
 
-Use a model name that is available on Vertex AI in your location; names and availability change,
-so check the Vertex AI model list. If your code still uses the older `google-generativeai`
+The examples use `gemini-4-hydrogen`, the current general-purpose generally-available Gemini 4
+model on both the [Gemini API](https://ai.google.dev/gemini-api/docs/models) and
+[Vertex AI](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/4-hydrogen).
+Names and availability change, so pick the latest stable (non-preview) ID from those official
+pages, and confirm it is offered in your Vertex AI location. If your code still uses the older `google-generativeai`
 package, migrate to `google-genai` first (see the official migration guide linked in the
 blueprint's docs).
 

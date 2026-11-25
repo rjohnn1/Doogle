@@ -24,6 +24,9 @@ verification. Dates are intentions, not promises. Track live status in the GitHu
 ## Later
 
 - [ ] MCP server mode so AI assistants can call `list`/`explain`/`plan` as tools (plan-only by default)
+- [ ] Deeper agent-IDE integration (for example Google Antigravity): first-class `--json` tool use,
+      confirmation-aware `--apply` from inside the IDE, and tighter plan-only MCP. There is no
+      official Antigravity integration today; see [USING_WITH_AGENTS.md](USING_WITH_AGENTS.md).
 - [ ] Composable blueprints (an "API + database + auth" stack from smaller pieces)
 - [ ] Drift detection before resume (compare recorded resources with current state, read-only)
 - [ ] Eval set of goals -> expected blueprint for `doogle ask`, run in CI

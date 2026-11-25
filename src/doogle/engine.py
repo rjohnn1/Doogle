@@ -99,7 +99,11 @@ FORBIDDEN_VALUE_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"}
 BLUEPRINTS_ENV = "DOOGLE_BLUEPRINTS_DIR"
 STATE_DIR_ENV = "DOOGLE_STATE_DIR"
 GEMINI_MODEL_ENV = "DOOGLE_GEMINI_MODEL"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+# General-purpose GA model on the Gemini API and Vertex AI (as of 2026-11-25).
+# Sources: https://ai.google.dev/gemini-api/docs/models
+#          https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/4-hydrogen
+# Override with DOOGLE_GEMINI_MODEL. Check those pages before bumping the default.
+DEFAULT_GEMINI_MODEL = "gemini-4-hydrogen"
 AI_KEY_ENVS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 
 TOOL_HINTS = {

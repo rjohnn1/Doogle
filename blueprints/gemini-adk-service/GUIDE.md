@@ -43,7 +43,7 @@ def get_utc_time() -> dict:
 
 root_agent = Agent(
     name="helper_agent",
-    model="gemini-2.5-flash",  # pick any Gemini model available in your Vertex AI location
+    model="gemini-4-hydrogen",  # or another GA model available in your Vertex AI location; see https://ai.google.dev/gemini-api/docs/models
     description="A small helper agent.",
     instruction="Answer briefly. Use get_utc_time when asked about the time.",
     tools=[get_utc_time],

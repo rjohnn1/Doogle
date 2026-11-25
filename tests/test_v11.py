@@ -302,7 +302,8 @@ REQUIRED_FILES = [
     ".github/ISSUE_TEMPLATE/config.yml", ".github/PULL_REQUEST_TEMPLATE.md", ".github/CODEOWNERS",
     ".github/dependabot.yml", ".github/workflows/ci.yml", ".github/workflows/codeql.yml",
     ".github/workflows/freshness.yml", ".github/labels.yml", "docs/LABELS.md", "docs/DECISION_MATRIX.md",
-    "docs/LAUNCH_PLAYBOOK.md", "docs/ROADMAP.md", "docs/INTRODUCTION.md", "demo/demo.tape", "demo/README.md",
+    "docs/LAUNCH_PLAYBOOK.md", "docs/ROADMAP.md", "docs/INTRODUCTION.md",
+    "docs/USING_WITH_AGENTS.md", "demo/demo.tape", "demo/README.md",
     "scripts/check_cli_syntax.py", "blueprints/_template/blueprint.yaml",
 ]
 

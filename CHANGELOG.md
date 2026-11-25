@@ -7,11 +7,32 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- Default optional AI model for `doogle ask --ai` is now `gemini-4-hydrogen` (was
+  `gemini-2.5-flash`). Vertex AI lists `gemini-2.5-flash` as retired on 2026-10-20;
+  `gemini-4-hydrogen` is the current general-purpose generally-available model on both
+  the Gemini API and Vertex AI. Override remains `DOOGLE_GEMINI_MODEL`. Blueprint
+  guide examples were updated to match, with links to the official model lists.
+- README status now describes this as a public release candidate (still `syntax-checked`,
+  not yet live-verified).
+- GitHub Actions: `google-github-actions/setup-gcloud` 2 → 3, `actions/setup-node` 4 → 7,
+  `actions/setup-python` 5 → 7, `actions/checkout` 4 → 7 (Dependabot PRs #1–#4), and
+  `github/codeql-action` 3 → 4 (PR #5 confirmed the bump, then Dependabot closed it after
+  a rebase, saying the action was already up to date; main was still on v3).
 - Repository URL and maintainer placeholders now use `rjohnn1/Doogle` and `@rjohnn1`.
 - Code of Conduct enforcement contact points at GitHub private vulnerability reporting
   (no personal email).
 - README states 1.2.0rc1 review status: blueprints are `syntax-checked`, not yet live-verified.
 - Added `docs/INTRODUCTION.md` for invited reviewers.
+
+### Added
+- `docs/USING_WITH_AGENTS.md`: how to drive Doogle from an AI coding agent or IDE such as
+  Google Antigravity, using `--json`, `doogle ask`, dry-run `plan`, and confirmed `--apply`.
+  Linked from the README. No official Antigravity integration is claimed.
+- Roadmap item for deeper agent-IDE integration.
+
+### Security
+- Enabled GitHub code scanning so the repo CodeQL workflow can upload results, plus
+  secret scanning and push protection.
 
 ## [1.2.0rc1] - 2026-11-19
 

@@ -22,7 +22,7 @@ Doogle is a curated, opinionated **decision guide plus dry-run-first setup bluep
 most common builder workflows. It is not a magic wrapper for every Google product; it goes
 deep and reliable on a small set of patterns and makes adding more a one-folder pull request.
 
-> **Status (1.2.0rc1).** This is a release candidate, currently in private review. All five
+> **Status (1.2.0rc1).** This is a public release candidate. All five
 > shipped blueprints are `syntax-checked` against recorded CLI versions; none have been run
 > end-to-end against a live Google Cloud project yet. Linux is the well-tested platform;
 > Windows and macOS are not fully verified. Invited reviewers: start with
@@ -150,12 +150,18 @@ doogle ask --ai "I need a backend for a mobile app with a chat assistant"
 ```
 
 Without a key, without the extra, or on any API error, Doogle falls back to offline routing and
-says so. Override the model with `DOOGLE_GEMINI_MODEL`.
+says so. The default model is `gemini-4-hydrogen`, the current general-purpose generally-available
+Gemini 4 model on the [Gemini API](https://ai.google.dev/gemini-api/docs/models) and
+[Vertex AI](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/4-hydrogen).
+Override it with `DOOGLE_GEMINI_MODEL`, and check those official model pages for newer stable IDs.
 
 ## For coding agents
 
 Use `--json` everywhere, check exit codes, plan before apply, and never pass
-`--approve-high-risk` without a human approving the exact plan. See
+`--approve-high-risk` without a human approving the exact plan. This works from a terminal
+inside an AI coding IDE such as [Google Antigravity](https://antigravity.google/) (there is
+no official Antigravity integration). See
+[docs/USING_WITH_AGENTS.md](docs/USING_WITH_AGENTS.md) and
 [OPERATING_GUIDE.md](OPERATING_GUIDE.md#3-driving-doogle-from-an-agent).
 
 ## Built something with Doogle?
