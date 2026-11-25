@@ -22,6 +22,8 @@ Doogle is a curated, opinionated **decision guide plus dry-run-first setup bluep
 most common builder workflows. It is not a magic wrapper for every Google product; it goes
 deep and reliable on a small set of patterns and makes adding more a one-folder pull request.
 
+Works from AI coding agents like [Google Antigravity](https://antigravity.google/): see [AGENTS.md](AGENTS.md) and the [agent guide](docs/USING_WITH_AGENTS.md).
+
 > **Status (1.2.0rc1).** This is a public release candidate. All five
 > shipped blueprints are `syntax-checked` against recorded CLI versions; none have been run
 > end-to-end against a live Google Cloud project yet. Linux is the well-tested platform;
@@ -160,7 +162,7 @@ Override it with `DOOGLE_GEMINI_MODEL`, and check those official model pages for
 Use `--json` everywhere, check exit codes, plan before apply, and never pass
 `--approve-high-risk` without a human approving the exact plan. This works from a terminal
 inside an AI coding IDE such as [Google Antigravity](https://antigravity.google/) (there is
-no official Antigravity integration). See
+no official Antigravity integration). Start with [AGENTS.md](AGENTS.md). See also
 [docs/USING_WITH_AGENTS.md](docs/USING_WITH_AGENTS.md) and
 [OPERATING_GUIDE.md](OPERATING_GUIDE.md#3-driving-doogle-from-an-agent).
 

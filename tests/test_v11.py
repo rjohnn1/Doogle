@@ -296,7 +296,7 @@ def test_share_snippet(capsys, monkeypatch):
 
 
 REQUIRED_FILES = [
-    "CODE_OF_CONDUCT.md", "SECURITY.md", "SUPPORT.md", "GOVERNANCE.md", "CHANGELOG.md",
+    "AGENTS.md", "CODE_OF_CONDUCT.md", "SECURITY.md", "SUPPORT.md", "GOVERNANCE.md", "CHANGELOG.md",
     ".github/ISSUE_TEMPLATE/blueprint_drift_or_bug.yml", ".github/ISSUE_TEMPLATE/bug_report.yml",
     ".github/ISSUE_TEMPLATE/feature_request.yml", ".github/ISSUE_TEMPLATE/new_blueprint.yml",
     ".github/ISSUE_TEMPLATE/config.yml", ".github/PULL_REQUEST_TEMPLATE.md", ".github/CODEOWNERS",

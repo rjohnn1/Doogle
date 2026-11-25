@@ -25,6 +25,9 @@ All notable changes to this project are documented here. The format follows
 - Added `docs/INTRODUCTION.md` for invited reviewers.
 
 ### Added
+- Root `AGENTS.md` for AI coding agents (Google Antigravity loads this file as always-on
+  workspace rules), covering safe use of the CLI in a user's project and how to contribute
+  to this repo. Linked from the README.
 - `docs/USING_WITH_AGENTS.md`: how to drive Doogle from an AI coding agent or IDE such as
   Google Antigravity, using `--json`, `doogle ask`, dry-run `plan`, and confirmed `--apply`.
   Linked from the README. No official Antigravity integration is claimed.
